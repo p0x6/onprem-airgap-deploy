@@ -1,0 +1,44 @@
+# Nightly pg_dump to a host path, so the backup survives anything that
+# happens to the cluster and healthcheck.sh can verify it from the host.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  labels: {{- include "saleor.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 600
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: pg-dump
+              image: {{ .Values.images.postgres }}
+              imagePullPolicy: {{ .Values.imagePullPolicy }}
+              command: ["/bin/sh", "-c"]
+              args:
+                - >
+                  pg_dump -h postgres -U {{ .Values.postgres.user }}
+                  {{ .Values.postgres.database }}
+                  | gzip > /backups/saleor-$(date +%Y%m%d-%H%M%S).sql.gz
+                  && find /backups -name 'saleor-*.sql.gz'
+                  -mtime +{{ .Values.backup.keepDays }} -delete
+              env:
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: saleor-secrets
+                      key: postgres-password
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+          volumes:
+            - name: backups
+              hostPath:
+                path: {{ .Values.backup.hostPath }}
+                type: DirectoryOrCreate

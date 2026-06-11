@@ -1,0 +1,28 @@
+# Runs AFTER resources exist on first install (post-install — postgres is up
+# by then) and BEFORE the new code rolls out on upgrades (pre-upgrade).
+# before-hook-creation: each run replaces the previous job, so the old one
+# stays inspectable until the next release.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: saleor-migrate
+  labels: {{- include "saleor.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,pre-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 10
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app: saleor-migrate
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: {{ .Values.images.api }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          command: ["python", "manage.py", "migrate"]
+          env: {{- include "saleor.env" . | nindent 12 }}

@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: saleor-worker
+  labels: {{- include "saleor.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: saleor-worker
+  template:
+    metadata:
+      labels:
+        app: saleor-worker
+    spec:
+      containers:
+        - name: worker
+          image: {{ .Values.images.api }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          # Same command saleor-platform uses (worker + embedded beat).
+          # TODO(pass 1): verify against the compose file.
+          command:
+            - celery
+            - --app=saleor.celeryconf:app
+            - worker
+            - --loglevel=info
+            - -B
+          env: {{- include "saleor.env" . | nindent 12 }}

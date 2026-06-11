@@ -1,0 +1,28 @@
+images:
+  api: ghcr.io/saleor/saleor:3.23.9
+  dashboard: ghcr.io/saleor/saleor-dashboard:3.23.8
+  postgres: postgres:15-alpine
+  valkey: valkey/valkey:8.1-alpine
+
+# Air gap rule: a pull attempt is a bug and should fail loudly.
+imagePullPolicy: Never
+
+# Hostname the ingress answers to and the self-signed cert is issued for.
+# The operator's machine needs a hosts-file entry pointing this at the box.
+host: saleor.local
+
+saleor:
+  # Django SECRET_KEY
+  secretKey: ""
+  debug: "False"
+
+postgres:
+  user: saleor
+  password: ""          # required, same story as secretKey
+  database: saleor
+  storage: 10Gi         # local-path PVC
+
+backup:
+  schedule: "0 2 * * *"
+  hostPath: /var/backups/saleor
+  keepDays: 7
