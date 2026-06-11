@@ -79,6 +79,12 @@ for img in "${IMAGES[@]}"; do
   docker image rm "$img" >/dev/null || true   # keep CI runner disk in check
 done
 
+# TODO(ansible, do last): Mode B runs ansible-playbook ON the box, and blank
+# Ubuntu has no ansible/pip/venv. Bundle it here: pip download ansible-core
+# + deps, run inside a python:3.12 container per-arch so compiled wheels
+# (cryptography, PyYAML) match the target; plus python3-pip/python3-venv debs
+# via apt-get download. install.sh then pip-installs --no-index into a venv.
+
 # --- installer: chart, playbook, scripts ------------------------------------
 # Tolerates pieces that don't exist yet so the script is runnable from day one.
 installer_parts=()
