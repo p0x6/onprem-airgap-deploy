@@ -13,7 +13,8 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation
 spec:
   backoffLimit: 10
-  activeDeadlineSeconds: 600
+  # Must outlast a full crash-backoff cycle (~5 min) plus real migration
+  activeDeadlineSeconds: 900
   template:
     metadata:
       labels:

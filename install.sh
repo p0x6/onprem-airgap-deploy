@@ -34,6 +34,31 @@ check() {  # check <label> <command...>
 
 [[ $EUID -eq 0 ]] || { echo "run with sudo: sudo $0" >&2; exit 1; }
 
+# Any failure still produces a report file — the operator always has
+# something to email out, even when the install dies before verification.
+on_failure() {
+  local rc=$?
+  trap - ERR EXIT
+  [[ $rc -eq 0 ]] && exit 0
+  {
+    echo "saleor install report — $(date -Is)"
+    echo "RESULT: FAILED before verification completed (exit ${rc})"
+    echo
+    kubectl get pods -o wide 2>&1 || echo "(cluster not reachable)"
+    echo
+    kubectl get events --sort-by=.lastTimestamp 2>/dev/null | tail -20
+    for p in $(kubectl get pods --no-headers 2>/dev/null \
+        | grep -vE "Running|Completed" | awk '{print $1}'); do
+      echo "--- logs: $p"
+      kubectl logs "$p" --tail=30 2>&1 || true
+    done
+  } > "$REPORT" 2>&1
+  printf '\n==> RESULT: FAILED — report: %s\n' "$REPORT"
+  echo "    send that file to the vendor"
+  exit "$rc"
+}
+trap on_failure ERR EXIT
+
 # --- [1/5] prereqs -----------------------------------------------------------
 step "[1/5] checking prereqs"
 [[ -d "$BUNDLE_DIR" ]] || { echo "bundle dir not found: $BUNDLE_DIR" >&2; exit 1; }
@@ -48,6 +73,17 @@ note "bundle ${PREFIX}, ${avail_gb}GB free"
 
 # --- [2/5] config ------------------------------------------------------------
 step "[2/5] config (${CONFIG_FILE})"
+# Refuse to invent new secrets over an existing installation: the database
+# was initialized with the old ones, and fresh values can only break auth.
+# (Learned live: a config/database mismatch shows up as a crash-looping
+# migration job, nothing clearer.)
+if [[ ! -f "$CONFIG_FILE" ]] && command -v k3s >/dev/null 2>&1 \
+   && k3s kubectl get secret saleor-secrets >/dev/null 2>&1; then
+  echo "ERROR: an existing installation was found but ${CONFIG_FILE} is missing." >&2
+  echo "Refusing to generate new secrets over a live database." >&2
+  echo "Restore the config file from backup, or wipe first: k3s-uninstall.sh" >&2
+  exit 1
+fi
 if [[ ! -f "$CONFIG_FILE" ]]; then
   note "none found — generating. KEEP THIS FILE: upgrades reuse it, and the"
   note "postgres password cannot be changed by rerunning this script."
@@ -76,6 +112,7 @@ helm upgrade --install saleor "$CHART_DIR" \
   --timeout 15m --wait
 
 # --- [5/5] smoke test + report -----------------------------------------------
+trap - ERR EXIT   # from here on the smoke test owns reporting and exit codes
 step "[5/5] smoke test"
 {
   echo "saleor install report — $(date -Is)"
@@ -114,4 +151,18 @@ if [[ ${#fails[@]} -gt 0 ]]; then
 fi
 
 step "RESULT: VERIFIED — report: ${REPORT}"
-note "dashboard: https://${SALEOR_HOST}/dashboard/ (from a machine on this network)"
+box_ip="$(awk '/node-ip/{print $2}' /etc/rancher/k3s/config.yaml 2>/dev/null || true)"
+cat <<EOF
+
+    What to do now:
+    1. kubectl/helm in YOUR shell (this install ran as root):
+         source ~/.bashrc
+       New logins pick it up automatically.
+    2. Dashboard, from a machine on this network:
+         add "${box_ip:-<this-box-ip>} ${SALEOR_HOST}" to that machine's hosts file,
+         then browse to https://${SALEOR_HOST}/dashboard/
+         (self-signed certificate — the browser will warn once)
+    3. Keep ${CONFIG_FILE} safe. Upgrades reuse it; without it the
+       database credentials are unrecoverable from this script.
+    4. Email or archive the report: ${REPORT}
+EOF
