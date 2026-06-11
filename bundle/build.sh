@@ -101,6 +101,9 @@ else
   echo ">> WARNING: no installer assets exist yet (chart/, ansible/, install.sh)" >&2
 fi
 
+# --- pass-1 box helper (manual install without the chart) -------------------
+install -m 755 "$(dirname "$0")/box-install.sh" "${OUT}/${prefix}-box-install.sh"
+
 # --- manifest + checksums ----------------------------------------------------
 (cd "$OUT" && ls "${prefix}"-* > "${prefix}.MANIFEST")
 (cd "$OUT" && sha256sum "${prefix}"-* > "${prefix}.SHA256SUMS")
