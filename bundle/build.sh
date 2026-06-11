@@ -105,4 +105,21 @@ install -m 755 "$(dirname "$0")/box-install.sh" "${OUT}/${prefix}-box-install.sh
 (cd "$OUT" && ls "${prefix}"-* > "${prefix}.MANIFEST")
 (cd "$OUT" && sha256sum "${prefix}"-* > "${prefix}.SHA256SUMS")
 
-echo ">> done: $(ls "$OUT" | wc -l | tr -d ' ') files in ${OUT}/"
+# --- single-file release: extract anywhere, run ./install.sh -----------------
+# One tar.gz per arch with everything inside, under a top-level dir. ~760MB
+# today — if it ever nears GitHub's 2GB asset cap, ship the pieces instead.
+echo ">> assembling release tarball"
+stage_root="$(mktemp -d)"
+stage="${stage_root}/${prefix}"
+mkdir -p "$stage"
+cp "${OUT}/${prefix}"-* "$stage/"
+rm -f "${stage}/${prefix}-installer.tar.gz"
+tar -xzf "${OUT}/${prefix}-installer.tar.gz" -C "$stage"   # chart/ install.sh healthcheck.sh
+(cd "$stage" && ls "${prefix}"-* > "${prefix}.MANIFEST" \
+             && sha256sum "${prefix}"-* > "${prefix}.SHA256SUMS")
+mkdir -p "${OUT}/release"
+tar -czf "${OUT}/release/${prefix}.tar.gz" -C "$stage_root" "${prefix}"
+(cd "${OUT}/release" && sha256sum "${prefix}.tar.gz" > "${prefix}.tar.gz.sha256")
+rm -rf "$stage_root"
+
+echo ">> done: $(ls "$OUT" | wc -l | tr -d ' ') pieces in ${OUT}/, release tarball in ${OUT}/release/"

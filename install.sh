@@ -12,6 +12,11 @@ set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 BUNDLE_DIR="${BUNDLE_DIR:-${here}/dist}"
+# Release-download layout: all assets in one dir, installer tarball extracted
+# in place — the pieces sit next to this script instead of under dist/.
+if [[ ! -d "$BUNDLE_DIR" ]] && compgen -G "${here}/*.SHA256SUMS" >/dev/null; then
+  BUNDLE_DIR="$here"
+fi
 CHART_DIR="${CHART_DIR:-${here}/chart}"
 CONFIG_FILE="${CONFIG_FILE:-/etc/saleor/install.conf}"
 REPORT="${REPORT:-${here}/install-report-$(date +%Y%m%d-%H%M%S).txt}"

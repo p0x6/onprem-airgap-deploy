@@ -44,15 +44,18 @@ The layering rule: `install.sh` is UX and verification, `box-install.sh` is host
 
 ## Quick start
 
-On a machine with internet and docker:
+Grab the one tarball for your arch from [Releases](../../releases), or build
+it yourself on a machine with internet and docker:
 
 ```bash
-./bundle/build.sh --arch amd64        # or arm64. pieces land in bundle/dist/
+./bundle/build.sh --arch amd64        # or arm64 → bundle/dist/release/<name>.tar.gz
 ```
 
-Get `bundle/dist/` onto the box (USB or scp), then on the box:
+Get it onto the box (USB or scp), then on the box:
 
 ```bash
+tar xzf saleor-airgap-*.tar.gz
+cd saleor-airgap-*/
 sudo ./install.sh
 ```
 
