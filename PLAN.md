@@ -32,9 +32,9 @@ The VM on my Mac is arm64, the old laptop is x86_64. So the install has to suppo
 
 5. **Upgrade and rollback, actually demonstrated.** New version arrives as another bundle; upgrade = import images + `helm upgrade` with migrations as a hook/Job. Rollback = `helm rollback` (old images are still in containerd) plus the DB backup taken before the upgrade. Both get run for real, not just written.
 
-6. **`healthcheck.sh`** — the day-two support loop. Something a non-engineer can run: checks pod states, disk, DB connectivity, whether last night's backup exists. Writes one report file they can carry out on USB and email me. If anything's wrong it bundles up pod logs, describes, and events into a single support tarball — one file out, success or failure.
+6. **`healthcheck.sh`** — the day-two support loop. Something a non-engineer can run: checks pod states, disk, DB connectivity, whether last night's backup exists. Writes one report file they can carry out on USB and email me. If anything's wrong it bundles up pod logs, describes, and events into a single support tarball, one file out, success or failure.
 
-7. **CI that builds the releases.** GitHub Actions matrix — one native amd64 runner, one arm64 — both running the same `bundle/build.sh`. Tag a version and the bundles get attached to a GitHub Release; that *is* the vendor release pipeline, and bundle v2 for the upgrade test is just the next tag.
+7. **CI that builds the releases.** GitHub Actions matrix. one native amd64 runner, one arm64 — both running the same `bundle/build.sh`. Tag a version and the bundles get attached to a GitHub Release; that *is* the vendor release pipeline, and bundle v2 for the upgrade test is just the next tag.
 
 
 ## How it fits together
