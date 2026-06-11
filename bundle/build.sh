@@ -63,6 +63,9 @@ echo ">> fetching k3s ${K3S_VERSION} (${ARCH})"
 curl -fL "${k3s_url}/${k3s_bin}" -o "${OUT}/${prefix}-k3s"
 curl -fL "${k3s_url}/k3s-airgap-images-${ARCH}.tar.zst" \
   -o "${OUT}/${prefix}-k3s-airgap-images.tar.zst"
+# official installer, run offline with INSTALL_K3S_SKIP_DOWNLOAD=true —
+# it creates the systemd unit, env file, and uninstall scripts
+curl -fL "https://get.k3s.io" -o "${OUT}/${prefix}-k3s-install.sh"
 
 # --- helm: static binary, goes to the box alongside k3s ---------------------
 echo ">> fetching helm ${HELM_VERSION} (${ARCH})"
