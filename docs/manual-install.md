@@ -112,11 +112,20 @@ sudo k3s kubectl delete pod valkey-test
 
 ## 6. Install the app
 
+The chart travels in the installer piece of the bundle (or via the repo
+during pass 1). Two values are required on purpose — there are no default
+secrets:
+
 ```bash
-helm install saleor ./chart -f values.yaml
+helm install saleor ./chart \
+  --set saleor.secretKey="$(openssl rand -hex 32)" \
+  --set postgres.password="$(openssl rand -hex 16)"
+kubectl get pods -w   # postgres/valkey first, migrate job, then api/worker/dashboard
 ```
 
-> Chart doesn't exist yet
+> The chart is a pass-1 skeleton: every `TODO(pass 1)` comment in
+> `chart/templates/` marks something to verify against the running app
+> (env var names, health endpoint, dashboard runtime config, celery cmd).
 
 ## Reboot test
 
