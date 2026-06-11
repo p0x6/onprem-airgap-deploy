@@ -64,6 +64,12 @@ curl -fL "${k3s_url}/${k3s_bin}" -o "${OUT}/${prefix}-k3s"
 curl -fL "${k3s_url}/k3s-airgap-images-${ARCH}.tar.zst" \
   -o "${OUT}/${prefix}-k3s-airgap-images.tar.zst"
 
+# --- helm: static binary, goes to the box alongside k3s ---------------------
+echo ">> fetching helm ${HELM_VERSION} (${ARCH})"
+curl -fsL "https://get.helm.sh/helm-${HELM_VERSION}-linux-${ARCH}.tar.gz" \
+  | tar -xzO "linux-${ARCH}/helm" > "${OUT}/${prefix}-helm"
+chmod +x "${OUT}/${prefix}-helm"
+
 # --- app images: one piece per image ----------------------------------------
 for img in "${IMAGES[@]}"; do
   safe="$(echo "$img" | tr '/:' '__')"
