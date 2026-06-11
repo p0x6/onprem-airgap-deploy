@@ -66,6 +66,18 @@ done
 }
 k3s kubectl get nodes   # version column must match the bundle's k3s
 
+say "making kubectl/helm work for the login user (not just root)"
+# Lab-box shortcut: world-readable admin kubeconfig. The real install.sh
+# should revisit this (group perms or a copied ~/.kube/config).
+chmod 644 /etc/rancher/k3s/k3s.yaml
+if [[ -n "${SUDO_USER:-}" ]]; then
+  user_home="$(getent passwd "$SUDO_USER" | cut -d: -f6)"
+  kline='export KUBECONFIG=/etc/rancher/k3s/k3s.yaml'
+  grep -qxF "$kline" "${user_home}/.bashrc" 2>/dev/null \
+    || echo "$kline" >> "${user_home}/.bashrc"
+  echo "   added KUBECONFIG to ${user_home}/.bashrc (run: source ~/.bashrc)"
+fi
+
 say "waiting for app images to be visible to the kubelet (up to 120s)"
 seen=0
 for _ in $(seq 1 24); do
@@ -92,4 +104,3 @@ fi
 k3s kubectl delete pod valkey-test >/dev/null
 
 say "PASS: node Ready, 4/4 images local to the kubelet, no-pull pod ran."
-say "next: helm install saleor ./chart (see docs/manual-install.md step 6)"

@@ -74,12 +74,18 @@ sudo k3s kubectl get nodes     # expect: Ready
 sudo k3s kubectl get pods -A   # coredns, traefik, local-path, metrics — Running
 ```
 
-To use `kubectl`/`helm` without sudo (fine for a lab box):
+To use `kubectl`/`helm` without sudo (fine for a lab box — `box-install.sh`
+does this for you, including the `.bashrc` line):
 
 ```bash
 sudo chmod 644 /etc/rancher/k3s/k3s.yaml
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+echo 'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml' >> ~/.bashrc
 ```
+
+Skipping this is what the classic `localhost:8080 connection refused` error
+from helm/kubectl means — no kubeconfig, so they aim at a default that
+nothing listens on.
 
 ## 4. Install helm, import the app images
 
