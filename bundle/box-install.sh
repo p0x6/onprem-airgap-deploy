@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Pass-1 helper: runs ON the box, does docs/manual-install.md steps 2–5
-# (everything except the chart). Temporary scaffolding — the Ansible playbook
-# + install.sh replace this. Run it from inside the bundle directory:
+# The host installer: runs ON the box, does docs/manual-install.md steps 2–5
+# (everything except the chart — that's helm's job, driven by install.sh).
+# Self-contained bash on purpose: nothing to install before the installer.
+# Run it from inside the bundle directory:
 #
 #   sudo ./<prefix>-box-install.sh
 #

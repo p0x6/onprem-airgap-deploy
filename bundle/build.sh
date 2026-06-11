@@ -82,23 +82,20 @@ for img in "${IMAGES[@]}"; do
   docker image rm "$img" >/dev/null || true   # keep CI runner disk in check
 done
 
-# TODO(ansible, do last): Mode B runs ansible-playbook ON the box, and blank
-# Ubuntu has no ansible/pip/venv. Bundle it here: pip download ansible-core
-# + deps, run inside a python:3.12 container per-arch so compiled wheels
-# (cryptography, PyYAML) match the target; plus python3-pip/python3-venv debs
-# via apt-get download. install.sh then pip-installs --no-index into a venv.
+# No config-management tooling ships in the bundle, deliberately: Ansible is
+# a Python app, and wheels couple the bundle to the target's Python version
+# (22.04=3.10, 24.04=3.12). The installer is self-contained bash instead.
 
-# --- installer: chart, playbook, scripts ------------------------------------
-# Tolerates pieces that don't exist yet so the script is runnable from day one.
+# --- installer: chart + scripts ----------------------------------------------
 installer_parts=()
-for p in chart ansible install.sh healthcheck.sh; do
+for p in chart install.sh healthcheck.sh; do
   [[ -e "${repo_root}/${p}" ]] && installer_parts+=("$p")
 done
 if [[ ${#installer_parts[@]} -gt 0 ]]; then
   echo ">> packing installer: ${installer_parts[*]}"
   tar -C "$repo_root" -czf "${OUT}/${prefix}-installer.tar.gz" "${installer_parts[@]}"
 else
-  echo ">> WARNING: no installer assets exist yet (chart/, ansible/, install.sh)" >&2
+  echo ">> WARNING: no installer assets exist yet (chart/, install.sh)" >&2
 fi
 
 # --- pass-1 box helper (manual install without the chart) -------------------

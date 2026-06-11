@@ -3,11 +3,10 @@ set -euo pipefail
 
 # install.sh — the one command the operator runs.
 #
-# UX + verification only. Host/cluster setup lives in the installer
-# (box-install.sh today; the ansible playbook will take its place), runtime
-# definition lives in the helm chart. This script checks prereqs, reads or
-# creates config, invokes those two, smoke-tests the result, and writes a
-# report file the operator can email out.
+# UX + verification only. Host/cluster setup lives in box-install.sh,
+# runtime definition lives in the helm chart. This script checks prereqs,
+# reads or creates config, invokes those two, smoke-tests the result, and
+# writes a report file the operator can email out.
 #
 # Exit 0 means VERIFIED WORKING — not "script reached the end".
 

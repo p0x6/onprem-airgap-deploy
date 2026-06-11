@@ -1,8 +1,8 @@
 # Manual install (pass 1)
 
 How to get the stack onto a blank Ubuntu box by hand, from the bundle, no
-internet needed on the box. This is the procedure the Ansible playbook will
-later automate — if a step isn't here, it shouldn't be in the playbook either.
+internet needed on the box. This is the procedure box-install.sh automates —
+if a step isn't here, it shouldn't be in the installer either.
 
 Assumes: Ubuntu Server 24.04, a sudo user, and the bundle pieces built by
 `bundle/build.sh` for the box's architecture.
