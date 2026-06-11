@@ -1,0 +1,48 @@
+name: build-bundle
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    name: bundle (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    env:
+      # On tag builds the bundle is versioned by the tag; manual runs get "dev"
+      BUNDLE_VERSION: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'dev' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free up runner disk
+        run: docker system prune -af
+
+      - name: Build bundle pieces
+        run: ./bundle/build.sh --arch ${{ matrix.arch }} --out dist
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: saleor-airgap-${{ env.BUNDLE_VERSION }}-${{ matrix.arch }}
+          path: dist/
+          if-no-files-found: error
+
+      # Each piece stays under GitHub's 2GB-per-asset release limit;
+      # the MANIFEST + SHA256SUMS files tie them back together.
+      - name: Attach pieces to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
