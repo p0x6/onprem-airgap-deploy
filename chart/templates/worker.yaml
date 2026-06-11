@@ -17,12 +17,18 @@ spec:
         - name: worker
           image: {{ .Values.images.api }}
           imagePullPolicy: {{ .Values.imagePullPolicy }}
-          # Same command saleor-platform uses (worker + embedded beat).
-          # TODO(pass 1): verify against the compose file.
+          # Same command saleor-platform uses (worker + embedded beat) —
+          # verified in pass 1: processes the post-migration tasks.
           command:
             - celery
             - --app=saleor.celeryconf:app
             - worker
             - --loglevel=info
             - -B
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 1Gi
           env: {{- include "saleor.env" . | nindent 12 }}
