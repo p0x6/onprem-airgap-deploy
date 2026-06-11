@@ -22,6 +22,26 @@ postgres:
   database: saleor
   storage: 10Gi         # local-path PVC
 
+# Replicas and optional autoscaling. The HPA needs metrics-server (k3s ships
+# it) and CPU requests on the deployments (set). When autoscaling is enabled
+# the fixed replica count is ignored — the HPA owns it.
+api:
+  replicas: 1
+  autoscaling:
+    enabled: false
+    min: 1
+    max: 4
+    targetCPUPercent: 75
+worker:
+  replicas: 1
+  autoscaling:
+    enabled: false
+    min: 1
+    max: 4
+    targetCPUPercent: 75
+dashboard:
+  replicas: 1
+
 backup:
   schedule: "0 2 * * *"
   hostPath: /var/backups/saleor

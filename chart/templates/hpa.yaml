@@ -1,0 +1,26 @@
+# Optional autoscaling — off by default, switched on per component in
+# values.yaml. CPU-based; k3s's bundled metrics-server provides the numbers.
+{{- range $name, $cfg := dict "saleor-api" .Values.api "saleor-worker" .Values.worker }}
+{{- if $cfg.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $name }}
+  labels: {{- include "saleor.labels" $ | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ $name }}
+  minReplicas: {{ $cfg.autoscaling.min }}
+  maxReplicas: {{ $cfg.autoscaling.max }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $cfg.autoscaling.targetCPUPercent }}
+{{- end }}
+{{- end }}

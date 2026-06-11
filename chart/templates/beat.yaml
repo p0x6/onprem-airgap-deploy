@@ -1,36 +1,35 @@
+# The celery scheduler. Exactly one of these, always — beat is the one
+# component that must never scale (each instance fires every periodic task).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: saleor-worker
+  name: saleor-beat
   labels: {{- include "saleor.labels" . | nindent 4 }}
 spec:
-  {{- if not .Values.worker.autoscaling.enabled }}
-  replicas: {{ .Values.worker.replicas }}
-  {{- end }}
+  replicas: 1
+  strategy:
+    type: Recreate   # never two beats, not even during a rollout
   selector:
     matchLabels:
-      app: saleor-worker
+      app: saleor-beat
   template:
     metadata:
       labels:
-        app: saleor-worker
+        app: saleor-beat
     spec:
       containers:
-        - name: worker
+        - name: beat
           image: {{ .Values.images.api }}
           imagePullPolicy: {{ .Values.imagePullPolicy }}
-          # No -B here: beat runs as its own single-replica deployment
-          # (beat.yaml) so workers can scale — N embedded beats would run
-          # every scheduled task N times.
           command:
             - celery
             - --app=saleor.celeryconf:app
-            - worker
+            - beat
             - --loglevel=info
           resources:
             requests:
-              cpu: 250m
-              memory: 512Mi
+              cpu: 50m
+              memory: 128Mi
             limits:
-              memory: 1Gi
+              memory: 256Mi
           env: {{- include "saleor.env" . | nindent 12 }}

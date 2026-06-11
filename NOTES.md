@@ -44,6 +44,10 @@ k3s regenerates k3s.yaml with 0600 on every service start, so my chmod 644 quiet
 
 Planned an Ansible playbook that would also run locally on the box for the true air-gap mode. Dropped it: Ansible is a Python app, so bundling it means shipping wheels that match the target's Python exactly — and my "24.04" VM turned out to be 22.04 with Python 3.10, which would have silently broken wheels built for 3.12. The container images don't care about any of this, which is the whole point of containers. Kept the install as self-contained bash (what real vendors ship into air gaps) and left Ansible as what it actually is in these environments: the customer's fleet tool, run inside their enclave with their own mirrors.
 
-## 10. Rollback doesn't clean up the failed upgrade's hook job
+## 10. --reuse-values ignores the new chart's defaults
+
+Added new values keys in chart 0.3.0 (replicas/autoscaling blocks) and upgraded with `--reuse-values` like always — template exploded with a nil pointer, because that flag replays the old release's values and never sees the new chart's defaults. The fix is `--reset-then-reuse-values` (new defaults underneath, old overrides on top). Notably the operator path was never exposed: install.sh passes explicit values every time, so only my dev shortcut could hit this.
+
+## 11. Rollback doesn't clean up the failed upgrade's hook job
 
 The migrate job was hooked on post-install,pre-upgrade. `helm rollback` is neither, so after the broken-image upgrade the dead ErrImageNeverPull pod just sat there through a successful rollback and healthcheck flagged the cluster as unhealthy when it wasn't. Added pre-rollback to the hook list: rollbacks now re-run migrations from the good revision and the before-hook-creation policy sweeps the corpse.
