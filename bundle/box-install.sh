@@ -45,6 +45,9 @@ mkdir -p /etc/rancher/k3s
 cat > /etc/rancher/k3s/config.yaml <<EOF
 node-ip: ${nodeip}
 flannel-iface: ${iface}
+# k3s rewrites k3s.yaml as 0600 on every start — a plain chmod doesn't
+# survive restarts/reboots; this does. Lab-box setting.
+write-kubeconfig-mode: "0644"
 EOF
 echo "   using ${nodeip} on ${iface}"
 
