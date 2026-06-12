@@ -51,3 +51,7 @@ Added new values keys in chart 0.3.0 (replicas/autoscaling blocks) and upgraded 
 ## 11. Rollback doesn't clean up the failed upgrade's hook job
 
 The migrate job was hooked on post-install,pre-upgrade. `helm rollback` is neither, so after the broken-image upgrade the dead ErrImageNeverPull pod just sat there through a successful rollback and healthcheck flagged the cluster as unhealthy when it wasn't. Added pre-rollback to the hook list: rollbacks now re-run migrations from the good revision and the before-hook-creation policy sweeps the corpse.
+
+## 12. docker save can produce a tarball that imports fine and cannot run
+
+The descheduler image (registry.k8s.io) imported cleanly on every node, showed in crictl — and every pod using it died at container-create with "parent snapshot ... does not exist". The `docker save` archive was missing part of the layer chain: newer docker exports the multi-arch index (registry.k8s.io attaches attestation manifests to theirs) and the result isn't complete. Five images from ghcr/docker hub were fine; the sixth wasn't. The nasty part is where it fails: not at build, not at import, not at checksum verify — only when a container actually starts, i.e. on the customer's box. Fix in build.sh: resolve the platform digest with `docker manifest inspect` and pull/tag/save THAT for every image, so no archive is ever cut from an index.

@@ -76,10 +76,31 @@ curl -fsL "https://get.helm.sh/helm-${HELM_VERSION}-linux-${ARCH}.tar.gz" \
 chmod +x "${OUT}/${prefix}-helm"
 
 # --- app images: one piece per image ----------------------------------------
+# Always save by the PLATFORM digest, never the multi-arch tag: newer docker
+# can export an index-shaped archive (esp. when the registry attaches
+# attestations, e.g. registry.k8s.io) whose layer chain is incomplete — it
+# imports cleanly on the box, then dies at container-create with
+# "parent snapshot ... does not exist". Found the hard way; see NOTES.md.
 for img in "${IMAGES[@]}"; do
   safe="$(echo "$img" | tr '/:' '__')"
   echo ">> saving ${img} (linux/${ARCH})"
-  docker pull --platform "linux/${ARCH}" "$img"
+  repo="${img%%:*}"
+  digest="$(docker manifest inspect "$img" 2>/dev/null | python3 -c "
+import json, sys
+try:
+    m = json.load(sys.stdin)
+    for e in m.get('manifests', []):
+        p = e.get('platform', {})
+        if p.get('architecture') == '${ARCH}' and p.get('os') == 'linux':
+            print(e['digest']); break
+except Exception:
+    pass")"
+  if [[ -n "$digest" ]]; then
+    docker pull "${repo}@${digest}"
+    docker tag "${repo}@${digest}" "$img"
+  else
+    docker pull --platform "linux/${ARCH}" "$img"   # single-platform image
+  fi
   docker save "$img" | zstd -T0 -f -o "${OUT}/${prefix}-image-${safe}.tar.zst"
   docker image rm "$img" >/dev/null || true   # keep CI runner disk in check
 done
