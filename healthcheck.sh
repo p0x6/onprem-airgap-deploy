@@ -53,6 +53,22 @@ check "graphql answers"       bash -c "curl -sk -m 20 --resolve ${SALEOR_HOST}:4
   -d '{\"query\":\"{ shop { name } }\"}' | grep -q '\"name\"'"
 check "disk <90% used on /"   bash -c '[[ "$(df --output=pcent / | tail -1 | tr -dc 0-9)" -lt 90 ]]'
 
+# Cluster-state backups: k3s snapshots etcd every 12h on HA servers. Only
+# checked where the snapshot dir exists (HA servers) — single-node installs
+# use sqlite and have no etcd to snapshot.
+ETCD_SNAP_DIR=/var/lib/rancher/k3s/server/db/snapshots
+# (the -d test needs root to pass — unprivileged runs skip this check)
+if [[ -d "$ETCD_SNAP_DIR" ]]; then
+  etcd_check() {
+    local newest age_h
+    newest="$(ls -t "$ETCD_SNAP_DIR" 2>/dev/null | head -1)"
+    [[ -n "$newest" ]] || return 1
+    age_h=$(( ($(date +%s) - $(stat -c %Y "$ETCD_SNAP_DIR/$newest")) / 3600 ))
+    [[ "$age_h" -le 13 ]]
+  }
+  check "recent etcd snapshot (<13h)" etcd_check
+fi
+
 newest_backup="$(ls -t "$BACKUP_DIR"/saleor-*.sql.gz 2>/dev/null | head -1)"
 backup_check() {
   [[ -n "$newest_backup" ]] || return 1
@@ -61,6 +77,8 @@ backup_check() {
   [[ "$age_h" -le "$MAX_BACKUP_AGE_H" ]]
 }
 check "recent backup (<${MAX_BACKUP_AGE_H}h, valid gzip)" backup_check
+
+total_checks="$(grep -cE '^(PASS|FAIL)' "$REPORT" 2>/dev/null || echo '?')"
 
 # --- report footer -------------------------------------------------------------
 {
@@ -99,7 +117,7 @@ rm -rf "$work"
 rm -f "$REPORT"   # it's inside the bundle — keep "one file out" literal
 
 echo
-echo "PROBLEMS FOUND (${#fails[@]} of 8 checks failed):"
+echo "PROBLEMS FOUND (${#fails[@]} of ${total_checks} checks failed):"
 printf '  - %s\n' "${fails[@]}"
 echo
 echo "Email this file to the vendor: ${bundle}"
