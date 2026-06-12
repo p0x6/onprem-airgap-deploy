@@ -161,6 +161,16 @@ else
     # demo/ops pacing knob, e.g. REBALANCE_SCHEDULE="*/1 * * * *" in install.conf
     [[ -n "${REBALANCE_SCHEDULE:-}" ]] \
       && cluster_flags+=(--set rebalance.schedule="$REBALANCE_SCHEDULE")
+    # The Cluster CR goes through CNPG's admission webhook — which has no
+    # endpoints until the operator pods are Ready. k3s applies the operator
+    # manifest asynchronously, so WAIT for it before any ha-enabled helm.
+    note "waiting for the database operator (webhook must have endpoints)"
+    for _ in $(seq 1 60); do
+      kubectl -n cnpg-system get deploy cnpg-controller-manager >/dev/null 2>&1 && break
+      sleep 5
+    done
+    kubectl -n cnpg-system rollout status deploy/cnpg-controller-manager --timeout=300s >/dev/null \
+      || { echo "cnpg operator never became ready" >&2; exit 1; }
     if kubectl get sts postgres >/dev/null 2>&1 \
        && ! kubectl get cluster saleor-db >/dev/null 2>&1; then
       step "[4a/5] existing database -> replicated (automatic cutover)"
