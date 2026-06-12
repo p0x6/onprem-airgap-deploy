@@ -24,6 +24,7 @@ spec:
       labels:
         app: saleor-dashboard
     spec:
+      {{- include "saleor.fastFailover" . | nindent 6 }}
       containers:
         - name: dashboard
           image: {{ .Values.images.dashboard }}

@@ -73,10 +73,19 @@ sums=( "$BUNDLE_DIR"/*.SHA256SUMS )
 PREFIX="$(basename "${sums[0]}" .SHA256SUMS)"
 avail_gb="$(df --output=avail -BG / | tail -1 | tr -dc 0-9)"
 [[ "$avail_gb" -ge 10 ]] || { echo "need >=10GB free on /, have ${avail_gb}GB" >&2; exit 1; }
-note "bundle ${PREFIX}, ${avail_gb}GB free"
+# Multi-node: a join.conf next to the bundle means this box joins an
+# existing cluster instead of becoming one (see docs/multi-node.md).
+JOIN_ROLE=""
+[[ -f "$BUNDLE_DIR/join.conf" ]] \
+  && JOIN_ROLE="$(sed -n 's/^ROLE=//p' "$BUNDLE_DIR/join.conf" | head -1)"
+note "bundle ${PREFIX}, ${avail_gb}GB free${JOIN_ROLE:+, joining cluster as ${JOIN_ROLE}}"
 
 # --- [2/5] config ------------------------------------------------------------
 step "[2/5] config (${CONFIG_FILE})"
+if [[ -n "$JOIN_ROLE" ]]; then
+  note "joining box — app config and secrets live on the first server; none here"
+  SALEOR_HOST="${SALEOR_HOST:-saleor.local}"   # smoke test needs the hostname
+else
 # Refuse to invent new secrets over an existing installation: the database
 # was initialized with the old ones, and fresh values can only break auth.
 # (Learned live: a config/database mismatch shows up as a crash-looping
@@ -101,19 +110,39 @@ EOF
   )
 fi
 # shellcheck source=/dev/null
-source "$CONFIG_FILE"
+source "$CONFIG_FILE"   # may set CLUSTER_VIP for HA first-server installs
+fi
 
-# --- [3/5] host + cluster (the playbook's slot) ------------------------------
+# --- [3/5] host + cluster ------------------------------------------------------
 step "[3/5] k3s + images (box-install.sh)"
-( cd "$BUNDLE_DIR" && "./${PREFIX}-box-install.sh" )
+( cd "$BUNDLE_DIR" && CLUSTER_VIP="${CLUSTER_VIP:-}" "./${PREFIX}-box-install.sh" )
+
+# Agents have no API server — their verification IS box-install's PASS; the
+# cluster-side proof comes from `kubectl get nodes` on a server.
+if [[ "$JOIN_ROLE" == "agent" ]]; then
+  trap - ERR EXIT
+  {
+    echo "saleor install report — $(date -Is)"
+    echo "bundle: ${PREFIX}"
+    echo "role:   agent (joined $(sed -n 's/^K3S_URL=//p' "$BUNDLE_DIR/join.conf"))"
+    echo "k3s-agent: $(systemctl is-active k3s-agent)"
+  } > "$REPORT"
+  step "RESULT: VERIFIED (agent joined) — report: ${REPORT}"
+  note "confirm from any server node: kubectl get nodes"
+  exit 0
+fi
 
 # --- [4/5] application -------------------------------------------------------
-step "[4/5] app (helm upgrade --install)"
-helm upgrade --install saleor "$CHART_DIR" \
-  --set host="$SALEOR_HOST" \
-  --set saleor.secretKey="$SECRET_KEY" \
-  --set postgres.password="$POSTGRES_PASSWORD" \
-  --timeout 15m --wait
+if [[ -n "$JOIN_ROLE" ]]; then
+  step "[4/5] app — skipped (already installed cluster-wide from the first server)"
+else
+  step "[4/5] app (helm upgrade --install)"
+  helm upgrade --install saleor "$CHART_DIR" \
+    --set host="$SALEOR_HOST" \
+    --set saleor.secretKey="$SECRET_KEY" \
+    --set postgres.password="$POSTGRES_PASSWORD" \
+    --timeout 15m --wait
+fi
 
 # --- [5/5] smoke test + report -----------------------------------------------
 trap - ERR EXIT   # from here on the smoke test owns reporting and exit codes
@@ -166,7 +195,11 @@ cat <<EOF
          add "${box_ip:-<this-box-ip>} ${SALEOR_HOST}" to that machine's hosts file,
          then browse to https://${SALEOR_HOST}/dashboard/
          (self-signed certificate — the browser will warn once)
-    3. Keep ${CONFIG_FILE} safe. Upgrades reuse it; without it the
-       database credentials are unrecoverable from this script.
+    3. $(if [[ -n "$JOIN_ROLE" ]]; then
+         echo "Config and secrets live on the FIRST server (${CONFIG_FILE} there)."
+       else
+         echo "Keep ${CONFIG_FILE} safe. Upgrades reuse it; without it the"
+         printf '       %s' "database credentials are unrecoverable from this script."
+       fi)
     4. Email or archive the report: ${REPORT}
 EOF

@@ -1,0 +1,100 @@
+# Rebalancer: evicts pods that violate the topology spread constraints so
+# their replacements land on under-used (e.g. freshly recovered) nodes.
+# Eviction respects replica counts — it moves pods one at a time, it never
+# takes a service down. postgres/beat are untouched (no spread constraints).
+{{- if .Values.rebalance.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: descheduler
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: descheduler
+rules:
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "update"]
+  - apiGroups: [""]
+    resources: ["nodes", "namespaces", "pods"]
+    verbs: ["get", "watch", "list"]
+  - apiGroups: [""]
+    resources: ["pods/eviction"]
+    verbs: ["create"]
+  - apiGroups: ["scheduling.k8s.io"]
+    resources: ["priorityclasses"]
+    verbs: ["get", "watch", "list"]
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "watch", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: descheduler
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: descheduler
+subjects:
+  - kind: ServiceAccount
+    name: descheduler
+    namespace: kube-system
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: descheduler-policy
+  namespace: kube-system
+data:
+  policy.yaml: |
+    apiVersion: "descheduler/v1alpha2"
+    kind: "DeschedulerPolicy"
+    profiles:
+      - name: rebalance
+        pluginConfig:
+          - name: "RemovePodsViolatingTopologySpreadConstraint"
+            args:
+              constraints:
+                - ScheduleAnyway
+                - DoNotSchedule
+        plugins:
+          balance:
+            enabled:
+              - "RemovePodsViolatingTopologySpreadConstraint"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: descheduler
+  namespace: kube-system
+spec:
+  schedule: {{ .Values.rebalance.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 300
+      template:
+        spec:
+          serviceAccountName: descheduler
+          restartPolicy: Never
+          containers:
+            - name: descheduler
+              image: {{ .Values.rebalance.image }}
+              imagePullPolicy: {{ .Values.imagePullPolicy }}
+              command: ["/bin/descheduler"]
+              args:
+                - --policy-config-file=/policy/policy.yaml
+                - -v=3
+              volumeMounts:
+                - name: policy
+                  mountPath: /policy
+          volumes:
+            - name: policy
+              configMap:
+                name: descheduler-policy
+{{- end }}

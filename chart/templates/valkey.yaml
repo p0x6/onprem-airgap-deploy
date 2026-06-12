@@ -24,6 +24,7 @@ spec:
       labels:
         app: valkey
     spec:
+      {{- include "saleor.fastFailover" . | nindent 6 }}
       containers:
         - name: valkey
           image: {{ .Values.images.valkey }}

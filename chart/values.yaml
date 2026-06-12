@@ -21,6 +21,19 @@ postgres:
   password: ""          # required, same story as secretKey
   database: saleor
   storage: 10Gi         # local-path PVC
+  # Multi-node: pin the DB (and its backups) to one labeled box, e.g.
+  #   kubectl label node <name> data=true   ->   nodeSelector: {data: "true"}
+  # Empty = schedule anywhere (single-node behavior, unchanged).
+  nodeSelector: {}
+
+failover:
+  tolerationSeconds: 30
+
+# descheduler runs on a schedule and evicts pods that violate the spread constraints
+rebalance:
+  enabled: false
+  schedule: "*/10 * * * *"
+  image: registry.k8s.io/descheduler/descheduler:v0.36.0
 
 # Replicas and optional autoscaling. The HPA needs metrics-server (k3s ships
 # it) and CPU requests on the deployments (set). When autoscaling is enabled

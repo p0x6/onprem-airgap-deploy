@@ -26,6 +26,14 @@ spec:
       labels:
         app: saleor-api
     spec:
+      {{- include "saleor.fastFailover" . | nindent 6 }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: saleor-api
       containers:
         - name: api
           image: {{ .Values.images.api }}

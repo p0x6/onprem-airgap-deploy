@@ -28,6 +28,8 @@ IMAGES=(
   ghcr.io/saleor/saleor-dashboard:3.23.8
   postgres:15-alpine
   valkey/valkey:8.1-alpine
+  ghcr.io/kube-vip/kube-vip:v1.2.0   # HA control-plane VIP (multi-node)
+  registry.k8s.io/descheduler/descheduler:v0.36.0   # rebalance after node recovery
 )
 
 ARCH=""

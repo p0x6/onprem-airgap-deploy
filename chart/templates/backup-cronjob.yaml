@@ -15,6 +15,10 @@ spec:
       activeDeadlineSeconds: 600
       template:
         spec:
+          {{- with .Values.postgres.nodeSelector }}
+          # Backups pin with the database — same node, same hostPath disk
+          nodeSelector: {{- toYaml . | nindent 12 }}
+          {{- end }}
           restartPolicy: OnFailure
           containers:
             - name: pg-dump

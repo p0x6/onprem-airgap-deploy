@@ -1,3 +1,19 @@
+{{/* Fast failover for stateless pods — see values.yaml for why postgres
+     and beat deliberately don't get this. */}}
+{{- define "saleor.fastFailover" -}}
+{{- with .Values.failover.tolerationSeconds }}
+tolerations:
+  - key: node.kubernetes.io/unreachable
+    operator: Exists
+    effect: NoExecute
+    tolerationSeconds: {{ . }}
+  - key: node.kubernetes.io/not-ready
+    operator: Exists
+    effect: NoExecute
+    tolerationSeconds: {{ . }}
+{{- end }}
+{{- end }}
+
 {{/* Common labels */}}
 {{- define "saleor.labels" -}}
 app.kubernetes.io/part-of: saleor
