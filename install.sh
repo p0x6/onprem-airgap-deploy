@@ -193,6 +193,16 @@ else
     done
     kubectl -n cnpg-system rollout status deploy/cnpg-controller-manager --timeout=300s >/dev/null \
       || { echo "cnpg operator never became ready" >&2; exit 1; }
+    # Spread the operator replicas across machines — both being born on the
+    # first box (the only machine at conversion time) means the failover
+    # authority dies with that one node. The descheduler keeps this honest
+    # as machines join. (Idempotent strategic-merge.)
+    kubectl -n cnpg-system patch deploy cnpg-controller-manager --type=strategic -p '{
+      "spec": {"template": {"spec": {"topologySpreadConstraints": [{
+        "maxSkew": 1, "topologyKey": "kubernetes.io/hostname",
+        "whenUnsatisfiable": "ScheduleAnyway",
+        "labelSelector": {"matchLabels": {"app.kubernetes.io/name": "cloudnative-pg"}}
+      }]}}}' >/dev/null 2>&1 || true
     if kubectl get sts postgres >/dev/null 2>&1 \
        && ! kubectl get cluster saleor-db >/dev/null 2>&1; then
       step "[4a/5] existing database -> replicated (automatic cutover)"

@@ -88,7 +88,12 @@ curl -fsL "https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v$
 # Two operator replicas (leader-elected): a single replica can die WITH the
 # node holding the primary, and a dead operator promotes nobody — the
 # failover authority must survive any one node. Found the hard way.
-sed -i.bak 's/^  replicas: 1$/  replicas: 2/' "${OUT}/${prefix}-cnpg-operator.yaml" \
+# ...and the operator must start from the locally-staged image even when
+# the enclave registry's node is the one that died (pullPolicy Always would
+# create a circular dependency on the very failure being handled).
+sed -i.bak -e 's/^  replicas: 1$/  replicas: 2/' \
+  -e 's/imagePullPolicy: Always/imagePullPolicy: IfNotPresent/' \
+  "${OUT}/${prefix}-cnpg-operator.yaml" \
   && rm -f "${OUT}/${prefix}-cnpg-operator.yaml.bak"
 
 # --- helm: static binary, goes to the box alongside k3s ---------------------
