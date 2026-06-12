@@ -248,7 +248,16 @@ smoke_db() {
 check "postgres ready"       smoke_db
 check "valkey answers PING"  bash -c 'kubectl exec deploy/valkey -- valkey-cli ping | grep -q PONG'
 check "migrations complete"  bash -c '[[ "$(kubectl get job saleor-migrate -o jsonpath={.status.succeeded})" == 1 ]]'
-check "all pods healthy"     bash -c '! kubectl get pods --no-headers | grep -vE "Running|Completed" | grep -q .'
+# retried: right after install some pods legitimately flap (beat restarts
+# until migrations finish) — sample over a window, not an instant
+pods_settled() {
+  for _ in $(seq 1 12); do
+    kubectl get pods --no-headers 2>/dev/null | grep -vE "Running|Completed" | grep -q . || return 0
+    sleep 10
+  done
+  return 1
+}
+check "all pods healthy"     pods_settled
 # Through the real ingress: TLS, Host routing. (Plain http to the pod 301s —
 # production saleor enforces SSL redirect; see NOTES.md #7.)
 # retried: on a freshly JOINED node the local ingress (svclb) takes ~a
