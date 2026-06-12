@@ -24,6 +24,6 @@ spec:
       containers:
         - name: migrate
           image: {{ .Values.images.api }}
-          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          imagePullPolicy: {{ include "saleor.pullPolicy" . }}
           command: ["python", "manage.py", "migrate"]
           env: {{- include "saleor.env" . | nindent 12 }}

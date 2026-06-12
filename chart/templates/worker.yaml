@@ -26,7 +26,7 @@ spec:
       containers:
         - name: worker
           image: {{ .Values.images.api }}
-          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          imagePullPolicy: {{ include "saleor.pullPolicy" . }}
           # No -B here: beat runs as its own single-replica deployment
           # (beat.yaml) so workers can scale — N embedded beats would run
           # every scheduled task N times.

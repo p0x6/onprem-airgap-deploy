@@ -85,7 +85,7 @@ spec:
           containers:
             - name: descheduler
               image: {{ .Values.rebalance.image }}
-              imagePullPolicy: {{ .Values.imagePullPolicy }}
+              imagePullPolicy: {{ include "saleor.pullPolicy" . }}
               command: ["/bin/descheduler"]
               args:
                 - --policy-config-file=/policy/policy.yaml

@@ -30,7 +30,9 @@ IMAGES=(
   valkey/valkey:8.1-alpine
   ghcr.io/kube-vip/kube-vip:v1.2.0   # HA control-plane VIP (multi-node)
   registry.k8s.io/descheduler/descheduler:v0.36.0   # rebalance after node recovery
+  docker.io/library/registry:3.0.0   # in-enclave registry (multi-node)
 )
+CRANE_VERSION="v0.21.6"   # seeds the in-enclave registry from the tarballs
 
 ARCH=""
 OUT="dist"
@@ -69,6 +71,13 @@ curl -fL "${k3s_url}/k3s-airgap-images-${ARCH}.tar.zst" \
 # it creates the systemd unit, env file, and uninstall scripts
 curl -fL "https://get.k3s.io" -o "${OUT}/${prefix}-k3s-install.sh"
 
+# --- crane: static binary, pushes tarballs into the in-enclave registry -----
+echo ">> fetching crane ${CRANE_VERSION} (${ARCH})"
+crane_arch="$([[ "$ARCH" == "arm64" ]] && echo arm64 || echo x86_64)"
+curl -fsL "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_${crane_arch}.tar.gz" \
+  | tar -xzO crane > "${OUT}/${prefix}-crane"
+chmod +x "${OUT}/${prefix}-crane"
+
 # --- helm: static binary, goes to the box alongside k3s ---------------------
 echo ">> fetching helm ${HELM_VERSION} (${ARCH})"
 curl -fsL "https://get.helm.sh/helm-${HELM_VERSION}-linux-${ARCH}.tar.gz" \
@@ -96,6 +105,9 @@ try:
 except Exception:
     pass")"
   if [[ -n "$digest" ]]; then
+    # Purge any prior pull of the multi-arch tag — a stale index in the
+    # store makes docker save export 2 manifest entries (breaks crane push)
+    docker image rm -f "$img" >/dev/null 2>&1 || true
     docker pull "${repo}@${digest}"
     docker tag "${repo}@${digest}" "$img"
   else

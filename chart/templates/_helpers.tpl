@@ -1,3 +1,11 @@
+{{/* Pull policy: Never by default (air gap rule — a pull is a bug). With the
+     in-enclave registry enabled, IfNotPresent: a node missing an image pulls
+     it from the LAN mirror, never the internet (registries.yaml has no
+     upstream fallback that can succeed — the gap has no route out). */}}
+{{- define "saleor.pullPolicy" -}}
+{{- if .Values.registry.enabled }}IfNotPresent{{ else }}{{ .Values.imagePullPolicy }}{{ end -}}
+{{- end }}
+
 {{/* Fast failover for stateless pods — see values.yaml for why postgres
      and beat deliberately don't get this. */}}
 {{- define "saleor.fastFailover" -}}

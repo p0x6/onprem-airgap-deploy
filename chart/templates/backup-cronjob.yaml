@@ -23,7 +23,7 @@ spec:
           containers:
             - name: pg-dump
               image: {{ .Values.images.postgres }}
-              imagePullPolicy: {{ .Values.imagePullPolicy }}
+              imagePullPolicy: {{ include "saleor.pullPolicy" . }}
               command: ["/bin/sh", "-c"]
               args:
                 - >

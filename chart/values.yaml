@@ -29,6 +29,12 @@ postgres:
 failover:
   tolerationSeconds: 30
 
+# In-enclave registry (multi-node): when enabled, pull policy becomes
+# IfNotPresent and nodes fetch missing images from the LAN mirror that
+# box-install.sh deploys and seeds. Single-node: leave off.
+registry:
+  enabled: false
+
 # descheduler runs on a schedule and evicts pods that violate the spread constraints
 rebalance:
   enabled: false

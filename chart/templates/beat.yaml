@@ -20,7 +20,7 @@ spec:
       containers:
         - name: beat
           image: {{ .Values.images.api }}
-          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          imagePullPolicy: {{ include "saleor.pullPolicy" . }}
           command:
             - celery
             - --app=saleor.celeryconf:app

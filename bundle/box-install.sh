@@ -31,7 +31,12 @@ PREFIX="${sums[0]%.SHA256SUMS}"
 ROLE="first"
 K3S_URL="" K3S_TOKEN=""
 CLUSTER_VIP="${CLUSTER_VIP:-}"
-if [[ -f ./join.conf ]]; then
+# A first server's own dist dir contains the join.conf it WROTE (for other
+# boxes) — don't let a re-run misread it and demote this box to a joiner.
+# The cluster-init line in k3s config marks "I am the first server".
+if grep -qs "^cluster-init" /etc/rancher/k3s/config.yaml; then
+  CLUSTER_VIP="${CLUSTER_VIP:-$(sed -n 's/^CLUSTER_VIP=//p' ./join.conf 2>/dev/null)}"
+elif [[ -f ./join.conf ]]; then
   # shellcheck source=/dev/null
   source ./join.conf            # K3S_URL, K3S_TOKEN, ROLE, CLUSTER_VIP
   [[ "$ROLE" == "server" || "$ROLE" == "agent" ]] || {
@@ -77,6 +82,20 @@ mkdir -p /etc/rancher/k3s
   fi
 } > /etc/rancher/k3s/config.yaml
 echo "   using ${nodeip} on ${iface}"
+
+# Mirror config: image pulls for these registries get served by the
+# in-enclave registry (NodePort 30500 -> reachable at localhost on every
+# node via kube-proxy). Image names never change. Written on every node;
+# inert until the registry exists and the chart flips to IfNotPresent.
+cat > /etc/rancher/k3s/registries.yaml <<EOF
+mirrors:
+  ghcr.io:
+    endpoint: ["http://127.0.0.1:30500"]
+  docker.io:
+    endpoint: ["http://127.0.0.1:30500"]
+  registry.k8s.io:
+    endpoint: ["http://127.0.0.1:30500"]
+EOF
 
 # --- kube-vip: the floating control-plane address (first server only) ------
 if [[ "$ROLE" == "first" && -n "$CLUSTER_VIP" ]]; then
@@ -181,6 +200,60 @@ spec:
 EOF
 fi
 
+# --- in-enclave registry (first server hosts it; hostPath on this box) ------
+# Multi-node only (CLUSTER_VIP set): single-node installs stay unchanged.
+if [[ "$ROLE" == "first" && -n "$CLUSTER_VIP" ]]; then
+  say "writing in-enclave registry manifest (NodePort 30500, storage on $(hostname))"
+  mkdir -p /var/lib/rancher/k3s/server/manifests /var/lib/saleor-registry
+  cat > /var/lib/rancher/k3s/server/manifests/registry.yaml <<EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: enclave-registry
+  namespace: kube-system
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: enclave-registry
+  template:
+    metadata:
+      labels:
+        app: enclave-registry
+    spec:
+      nodeName: $(hostname)
+      containers:
+        - name: registry
+          image: docker.io/library/registry:3.0.0
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 5000
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/registry
+      volumes:
+        - name: data
+          hostPath:
+            path: /var/lib/saleor-registry
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: enclave-registry
+  namespace: kube-system
+spec:
+  type: NodePort
+  selector:
+    app: enclave-registry
+  ports:
+    - port: 5000
+      nodePort: 30500
+EOF
+fi
+
 # --- run the official installer offline -----------------------------------
 say "running k3s installer (offline mode, role: ${ROLE})"
 chmod +x "${PREFIX}-k3s-install.sh"
@@ -263,10 +336,22 @@ bad="$(k3s ctr images check 2>/dev/null \
   | grep -E 'saleor|postgres|valkey|kube-vip|descheduler' \
   | awk '$NF == "false" {print $1}' | sort -u)"
 if [[ -n "$bad" ]]; then
-  echo "images present but not unpacked:" >&2
-  echo "$bad" >&2
-  echo "fix: zstd -dc <its tarball> | k3s ctr images import --platform linux/\$(arch) -" >&2
-  exit 1
+  echo "   not unpacked (re-import of known content skips unpacking):"
+  echo "$bad" | sed 's/^/     /'
+  echo "   repairing via direct platform import..."
+  node_arch="$(uname -m | sed 's/aarch64/arm64/; s/x86_64/amd64/')"
+  for t in "${PREFIX}"-image-*.tar.zst; do
+    zstd -dc "$t" | k3s ctr images import --platform "linux/${node_arch}" - >/dev/null 2>&1 || true
+  done
+  bad="$(k3s ctr images check 2>/dev/null \
+    | grep -E 'saleor|postgres|valkey|kube-vip|descheduler' \
+    | awk '$NF == "false" {print $1}' | sort -u)"
+  if [[ -n "$bad" ]]; then
+    echo "still not unpacked after repair:" >&2
+    echo "$bad" >&2
+    exit 1
+  fi
+  echo "   repaired."
 fi
 k3s kubectl delete pod valkey-test --ignore-not-found >/dev/null 2>&1
 k3s kubectl run valkey-test --image=valkey/valkey:8.1-alpine \
@@ -278,6 +363,55 @@ if ! k3s kubectl wait pod/valkey-test \
   exit 1
 fi
 k3s kubectl delete pod valkey-test >/dev/null
+
+# --- first server: seed the in-enclave registry from the bundle -------------
+if [[ "$ROLE" == "first" && -n "$CLUSTER_VIP" ]]; then
+  say "seeding the in-enclave registry (idempotent — same blobs are no-ops)"
+  install -m 755 "${PREFIX}-crane" /usr/local/bin/crane
+  reg_ok=""
+  for _ in $(seq 1 24); do
+    curl -fsm 2 http://127.0.0.1:30500/v2/ >/dev/null 2>&1 && { reg_ok=yes; break; }
+    sleep 5
+  done
+  if [[ -z "$reg_ok" ]]; then
+    echo "   registry not answering on :30500 — seed skipped, re-run me later" >&2
+  else
+    for t in "${PREFIX}"-image-*.tar.zst; do
+      # The fully-qualified ref rides inside the archive's index annotations
+      ref="$(zstd -dc "$t" | tar -xO index.json 2>/dev/null | python3 -c '
+import json, sys
+try:
+    idx = json.load(sys.stdin)
+    for m in idx.get("manifests", []):
+        n = m.get("annotations", {}).get("io.containerd.image.name")
+        if n:
+            print(n); break
+except Exception:
+    pass')"
+      [[ -n "$ref" ]] || { echo "   no ref annotation in ${t} — skipped" >&2; continue; }
+      path="${ref#*/}"   # mirror requests arrive without the registry host
+      tmp="$(mktemp -d)"
+      zstd -dc "$t" | tar -x -C "$tmp"
+      # Some registries attach attestation referrers; docker save includes
+      # them as a second index entry and crane refuses the ambiguity. Keep
+      # only the named image entry.
+      python3 - "$tmp/index.json" <<'PY'
+import json, sys
+p = sys.argv[1]
+idx = json.load(open(p))
+idx["manifests"] = [m for m in idx["manifests"]
+                    if m.get("annotations", {}).get("io.containerd.image.name")]
+json.dump(idx, open(p, "w"))
+PY
+      if crane push "$tmp" "127.0.0.1:30500/${path}" --insecure >/dev/null 2>&1; then
+        echo "   seeded ${path}"
+      else
+        echo "   FAILED to seed ${path}" >&2
+      fi
+      rm -rf "$tmp"
+    done
+  fi
+fi
 
 # --- first server: write join.conf for the rest of the fleet ----------------
 if [[ "$ROLE" == "first" && -n "$CLUSTER_VIP" ]]; then

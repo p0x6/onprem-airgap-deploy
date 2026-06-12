@@ -28,7 +28,7 @@ spec:
       containers:
         - name: valkey
           image: {{ .Values.images.valkey }}
-          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          imagePullPolicy: {{ include "saleor.pullPolicy" . }}
           ports:
             - containerPort: 6379
           readinessProbe:

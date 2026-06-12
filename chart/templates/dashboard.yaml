@@ -28,7 +28,7 @@ spec:
       containers:
         - name: dashboard
           image: {{ .Values.images.dashboard }}
-          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          imagePullPolicy: {{ include "saleor.pullPolicy" . }}
           ports:
             - containerPort: 80
           env:
