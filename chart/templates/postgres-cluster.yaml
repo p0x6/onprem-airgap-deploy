@@ -1,0 +1,28 @@
+# Replicated postgres with automatic failover (CloudNativePG). One primary,
+# N-1 streaming standbys, anti-affined across nodes; lose the primary's node
+# and the operator promotes a standby in ~30s. The app only ever talks to
+# the rw service, which always points at the current primary.
+{{- if .Values.postgres.ha.enabled }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: saleor-db
+  labels: {{- include "saleor.labels" . | nindent 4 }}
+spec:
+  instances: {{ .Values.postgres.ha.instances }}
+  imageName: {{ .Values.postgres.ha.image }}
+  imagePullPolicy: {{ include "saleor.pullPolicy" . }}
+  primaryUpdateStrategy: unsupervised
+  bootstrap:
+    initdb:
+      database: {{ .Values.postgres.database }}
+      owner: {{ .Values.postgres.user }}
+      secret:
+        name: saleor-db-cred
+  storage:
+    size: {{ .Values.postgres.ha.storage }}
+    storageClass: local-path
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+{{- end }}

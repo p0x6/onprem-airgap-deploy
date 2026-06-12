@@ -254,6 +254,12 @@ spec:
 EOF
 fi
 
+# --- cnpg operator (multi-node: replicated postgres with auto-failover) -----
+if [[ "$ROLE" == "first" && -n "$CLUSTER_VIP" && -f "${PREFIX}-cnpg-operator.yaml" ]]; then
+  say "staging cloudnative-pg operator manifest"
+  cp "${PREFIX}-cnpg-operator.yaml" /var/lib/rancher/k3s/server/manifests/cnpg-operator.yaml
+fi
+
 # --- run the official installer offline -----------------------------------
 say "running k3s installer (offline mode, role: ${ROLE})"
 chmod +x "${PREFIX}-k3s-install.sh"
@@ -446,4 +452,9 @@ EOF
 fi
 
 say "PASS (${ROLE}): node Ready, 4/4 images local, no-pull pod ran."
-[[ -n "$CLUSTER_VIP" ]] && say "VIP: kubectl will answer at https://${CLUSTER_VIP}:6443 once kube-vip is up"
+# NB: as the last line, a bare `[[ ... ]] && say` would make a VIP-less run
+# exit 1 despite succeeding — install.sh's set -e then "fails" the install.
+if [[ -n "$CLUSTER_VIP" ]]; then
+  say "VIP: kubectl will answer at https://${CLUSTER_VIP}:6443 once kube-vip is up"
+fi
+exit 0

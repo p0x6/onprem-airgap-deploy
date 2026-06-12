@@ -1,3 +1,10 @@
+{{/* Where the database answers: the single StatefulSet's service, or the
+     CNPG read-write service in ha mode. Every consumer (app URL, backups)
+     goes through this so the switch is one value. */}}
+{{- define "saleor.dbHost" -}}
+{{- if .Values.postgres.ha.enabled }}saleor-db-rw{{ else }}postgres{{ end -}}
+{{- end }}
+
 {{/* Pull policy: Never by default (air gap rule — a pull is a bug). With the
      in-enclave registry enabled, IfNotPresent: a node missing an image pulls
      it from the LAN mirror, never the internet (registries.yaml has no

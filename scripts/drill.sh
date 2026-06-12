@@ -30,9 +30,25 @@ done
 K() { $SSH "${NODE_USER}@${ACCESS}" "env KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl $*"; }
 
 K get node "$TARGET" >/dev/null 2>&1 || fail "node ${TARGET} not in the cluster"
+# Never cut a node when the cluster is already degraded — with one server
+# down, killing another loses etcd quorum and blinds everything (learned
+# live: drill 2 fired while drill 1's node never came back).
+not_ready="$(K get nodes --no-headers 2>/dev/null | grep -cv ' Ready' || true)"
+[[ "${not_ready:-1}" == "0" ]] || fail "cluster already degraded (${not_ready} node(s) not Ready) — refusing to cut another"
 is_data="$(K get node "$TARGET" -o jsonpath='{.metadata.labels.data}' 2>/dev/null)"
+# A replicated database (CNPG) means there IS no data-node mode: every node
+# is expendable, and killing the primary's node must produce a PROMOTION.
+has_cnpg=""
+K get cluster saleor-db >/dev/null 2>&1 && { has_cnpg=yes; is_data=""; }
+expect_promotion=""
+if [[ -n "$has_cnpg" ]]; then
+  prim_node="$(K get pod -l cnpg.io/instanceRole=primary -o jsonpath='{.items[0].spec.nodeName}' 2>/dev/null)"
+  [[ "$prim_node" == "$TARGET" ]] && expect_promotion=yes
+fi
 if [[ "$is_data" == "true" ]]; then
   say "TARGET ${TARGET} IS THE DATA NODE — expecting honest degradation, not full self-heal"
+elif [[ -n "$expect_promotion" ]]; then
+  say "target ${TARGET} HOSTS THE DATABASE PRIMARY — expecting promotion + service continuity"
 else
   say "target ${TARGET} (access via ${ACCESS}) — expecting full self-heal"
 fi
@@ -43,6 +59,20 @@ K get pods -o wide --no-headers | awk '{print "  "$1, $3, $7}'
 say "POWER CUT ${TARGET} ($(date +%T))"
 VBoxManage controlvm "$TARGET" poweroff 2>/dev/null || fail "could not power off VM ${TARGET}"
 t0=$(date +%s)
+
+if [[ -n "$expect_promotion" ]]; then
+  say "waiting for standby promotion (the headline claim)"
+  promoted=""
+  for i in $(seq 1 60); do
+    newp="$(K get pod -l cnpg.io/instanceRole=primary -o jsonpath='{.items[0].spec.nodeName}' 2>/dev/null)"
+    if [[ -n "$newp" && "$newp" != "$TARGET" ]]; then
+      echo "  PROMOTED: new primary on ${newp} after ~$(( $(date +%s) - t0 ))s"
+      promoted=yes; break
+    fi
+    sleep 5
+  done
+  [[ -n "$promoted" ]] || fail "no standby was promoted — the database did not fail over"
+fi
 
 say "waiting for NotReady"
 for _ in $(seq 1 40); do
@@ -92,6 +122,12 @@ echo "  kubectl answers; quorum held"
 
 say "bringing ${TARGET} back"
 VBoxManage startvm "$TARGET" --type headless >/dev/null 2>&1
+sleep 5
+if [[ "$(VBoxManage showvminfo "$TARGET" --machinereadable | grep '^VMState=' | cut -d'"' -f2)" != "running" ]]; then
+  echo "  first power-on didn't take — retrying"
+  sleep 5
+  VBoxManage startvm "$TARGET" --type headless 2>&1 | tail -1
+fi
 rejoined=""
 for _ in $(seq 1 60); do
   ready="$(K get nodes --no-headers 2>/dev/null | grep -c ' Ready')"

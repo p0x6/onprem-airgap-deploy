@@ -62,6 +62,17 @@ The shape: CNPG operator + its postgres image in the bundle, the chart's postgre
 
 **Quick win, immediately: etcd snapshots into the support story.** k3s already snapshots etcd every 12h on the servers (/var/lib/rancher/k3s/server/db/snapshots) — healthcheck.sh gains a "recent etcd snapshot exists" check, and the recovery posture becomes statable with numbers: RPO ≤24h app data / ≤12h cluster state, RTO = the rehearsed restore.
 
+## Recovering from quorum loss
+
+Two of three servers down = the API stops serving (etcd needs a majority). The data is safe; the cluster is paused, not broken. Three tiers:
+
+1. **The nodes can come back** (power event — the usual case): start them. Quorum re-forms by itself the moment a second voter is up. Nothing else.
+2. **The lost servers are gone for good, one survivor remains:** the survivor has complete data (a minority that never served cannot have diverged). Tell it to stop waiting for the dead:
+
+`systemctl stop k3s && k3s server --cluster-reset && systemctl start k3s` it serves again as a 1-member cluster. Rebuild quorum by joining replacement boxes (bundle + join.conf, ROLE=server, back to an odd count).
+
+3. **All servers gone:** fresh box + bundle, then `k3s server --cluster-reset --cluster-reset-restore-path=<etcd snapshot>` restores cluster state; the pg dump restore brings back the app's data. This is why install.sh primes a first backup AND an etcd snapshot, and why healthcheck refuses to call a system healthy without fresh copies of both.
+
 ## Test rig prep (one-time, manual)
 
 The clone script needs a base VM to copy. Make it once:

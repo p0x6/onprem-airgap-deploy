@@ -137,11 +137,81 @@ if [[ -n "$JOIN_ROLE" ]]; then
   step "[4/5] app — skipped (already installed cluster-wide from the first server)"
 else
   step "[4/5] app (helm upgrade --install)"
+  # helm --wait is silent for minutes; narrate what it's waiting on so a
+  # stuck install is visible in 20s, not at the timeout.
+  # Cluster installs (VIP set) get the cluster features without extra
+  # flags — the config file is the contract, the operator shouldn't have
+  # to repeat what it already says. That includes the replicated database:
+  # fresh installs get it from birth; an existing single-instance database
+  # gets the full documented cutover (dump -> bootstrap -> restore), here,
+  # automatically — never silently, never without the dump first.
+  cluster_flags=()
+  if [[ -n "${CLUSTER_VIP:-}" ]]; then
+    # Cluster sizing included: extra replicas stack on the first box and
+    # the rebalancer spreads them as nodes join — scale-out IS the join.
+    # Override in install.conf: API_REPLICAS / WORKER_REPLICAS.
+    # Backups still land on ONE box's disk (this one) — that is all the
+    # data=true label means now; the database itself is replicated.
+    kubectl label node "$(hostname)" data=true --overwrite >/dev/null 2>&1 || true
+    cluster_flags=(--set registry.enabled=true --set rebalance.enabled=true
+                   --set postgres.ha.enabled=true
+                   --set-json 'postgres.nodeSelector={"data":"true"}' 
+                   --set api.replicas="${API_REPLICAS:-3}"
+                   --set worker.replicas="${WORKER_REPLICAS:-2}")
+    # demo/ops pacing knob, e.g. REBALANCE_SCHEDULE="*/1 * * * *" in install.conf
+    [[ -n "${REBALANCE_SCHEDULE:-}" ]] \
+      && cluster_flags+=(--set rebalance.schedule="$REBALANCE_SCHEDULE")
+    if kubectl get sts postgres >/dev/null 2>&1 \
+       && ! kubectl get cluster saleor-db >/dev/null 2>&1; then
+      step "[4a/5] existing database -> replicated (automatic cutover)"
+      note "taking the pre-cutover dump first"
+      kubectl delete job pre-ha-dump --ignore-not-found >/dev/null 2>&1
+      kubectl create job --from=cronjob/postgres-backup pre-ha-dump >/dev/null
+      kubectl wait --for=condition=complete job/pre-ha-dump --timeout=180s >/dev/null
+      kubectl delete job pre-ha-dump >/dev/null
+      dump="$(ls -t /var/backups/saleor/saleor-*.sql.gz | head -1)"
+      note "dump: ${dump}"
+      helm upgrade saleor "$CHART_DIR" \
+        --set host="$SALEOR_HOST" \
+        --set saleor.secretKey="$SECRET_KEY" \
+        --set postgres.password="$POSTGRES_PASSWORD" \
+        "${cluster_flags[@]}" --no-hooks --timeout 5m >/dev/null
+      note "waiting for the replicated database"
+      want="$(kubectl get cluster saleor-db -o jsonpath='{.spec.instances}')"
+      for _ in $(seq 1 45); do
+        r="$(kubectl get cluster saleor-db -o jsonpath='{.status.readyInstances}' 2>/dev/null)"
+        note "  instances ready: ${r:-0}/${want}"
+        [[ "$r" == "$want" ]] && break
+        sleep 10
+      done
+      [[ "$(kubectl get cluster saleor-db -o jsonpath='{.status.readyInstances}' 2>/dev/null)" == "$want" ]] \
+        || { echo "replicated database never became ready" >&2; exit 1; }
+      note "restoring the dump into the new primary"
+      P="$(kubectl get pod -l cnpg.io/cluster=saleor-db,cnpg.io/instanceRole=primary -o name | head -1)"
+      gunzip -c "$dump" | kubectl exec -i "${P#pod/}" -- psql -q -U postgres -d saleor >/dev/null 2>&1
+      note "restored; the hooked upgrade below re-points the app"
+    fi
+  fi
   helm upgrade --install saleor "$CHART_DIR" \
     --set host="$SALEOR_HOST" \
     --set saleor.secretKey="$SECRET_KEY" \
     --set postgres.password="$POSTGRES_PASSWORD" \
-    --timeout 15m --wait
+    "${cluster_flags[@]}" \
+    --timeout 15m --wait &
+  helm_pid=$!
+  while kill -0 "$helm_pid" 2>/dev/null; do
+    sleep 20
+    kill -0 "$helm_pid" 2>/dev/null || break
+    pending="$(kubectl get pods --no-headers 2>/dev/null \
+      | grep -vE 'Running|Completed' | awk '{printf "%s(%s) ", $1, $3}' || true)"
+    note "waiting on: ${pending:-final checks}"
+  done
+  wait "$helm_pid"
+  # post-cutover: running pods still hold the old DATABASE_URL — re-roll
+  if kubectl get cluster saleor-db >/dev/null 2>&1; then
+    kubectl rollout restart deploy/saleor-api deploy/saleor-worker deploy/saleor-beat >/dev/null 2>&1 || true
+    kubectl rollout status deploy/saleor-api --timeout=300s >/dev/null 2>&1 || true
+  fi
 fi
 
 # --- [5/5] smoke test + report -----------------------------------------------
@@ -157,15 +227,32 @@ step "[5/5] smoke test"
 } > "$REPORT"
 
 check "node Ready"           kubectl wait --for=condition=Ready node --all --timeout=60s
-check "postgres ready"       kubectl exec postgres-0 -- pg_isready -q
+smoke_db() {
+  if kubectl get cluster saleor-db >/dev/null 2>&1; then
+    p="$(kubectl get pod -l cnpg.io/cluster=saleor-db,cnpg.io/instanceRole=primary -o name 2>/dev/null | head -1)"
+    [[ -n "$p" ]] && kubectl exec "${p#pod/}" -- pg_isready -q
+  else
+    kubectl exec postgres-0 -- pg_isready -q
+  fi
+}
+check "postgres ready"       smoke_db
 check "valkey answers PING"  bash -c 'kubectl exec deploy/valkey -- valkey-cli ping | grep -q PONG'
 check "migrations complete"  bash -c '[[ "$(kubectl get job saleor-migrate -o jsonpath={.status.succeeded})" == 1 ]]'
 check "all pods healthy"     bash -c '! kubectl get pods --no-headers | grep -vE "Running|Completed" | grep -q .'
 # Through the real ingress: TLS, Host routing. (Plain http to the pod 301s —
 # production saleor enforces SSL redirect; see NOTES.md #7.)
-check "graphql answers"      bash -c "curl -sk -m 20 --resolve ${SALEOR_HOST}:443:127.0.0.1 \
-  -X POST https://${SALEOR_HOST}/graphql/ -H 'Content-Type: application/json' \
-  -d '{\"query\":\"{ shop { name } }\"}' | grep -q '\"name\"'"
+# retried: on a freshly JOINED node the local ingress (svclb) takes ~a
+# minute to start — a single early curl false-fails (seen live on node2)
+graphql_smoke() {
+  for _ in $(seq 1 9); do
+    curl -sk -m 20 --resolve "${SALEOR_HOST}:443:127.0.0.1" \
+      -X POST "https://${SALEOR_HOST}/graphql/" -H 'Content-Type: application/json' \
+      -d '{"query":"{ shop { name } }"}' | grep -q '"name"' && return 0
+    sleep 10
+  done
+  return 1
+}
+check "graphql answers"      graphql_smoke
 
 { echo; kubectl get pods -o wide; } >> "$REPORT" 2>&1
 
@@ -181,6 +268,21 @@ if [[ ${#fails[@]} -gt 0 ]]; then
   step "RESULT: FAILED (${#fails[@]} of 6 checks) — report: ${REPORT}"
   note "send that file to the vendor"
   exit 1
+fi
+
+# Day-two baselines exist from minute one: the operator should never have
+# an install whose first backup is scheduled for 2am.
+step "priming first backup + etcd snapshot (best effort)"
+if kubectl get cronjob postgres-backup >/dev/null 2>&1; then
+  kubectl delete job initial-backup --ignore-not-found >/dev/null 2>&1
+  kubectl create job --from=cronjob/postgres-backup initial-backup >/dev/null 2>&1 \
+    && kubectl wait --for=condition=complete job/initial-backup --timeout=180s >/dev/null 2>&1 \
+    && kubectl delete job initial-backup >/dev/null 2>&1 \
+    && note "first database backup taken" || note "backup priming skipped (see healthcheck later)"
+fi
+if [[ -d /var/lib/rancher/k3s/server/db/etcd ]]; then
+  k3s etcd-snapshot save --name install-baseline >/dev/null 2>&1 \
+    && note "etcd snapshot taken" || note "etcd snapshot skipped"
 fi
 
 step "RESULT: VERIFIED — report: ${REPORT}"

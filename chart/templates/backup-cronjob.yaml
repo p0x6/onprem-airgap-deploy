@@ -27,7 +27,7 @@ spec:
               command: ["/bin/sh", "-c"]
               args:
                 - >
-                  pg_dump -h postgres -U {{ .Values.postgres.user }}
+                  pg_dump -h {{ include "saleor.dbHost" . }} -U {{ .Values.postgres.user }}
                   {{ .Values.postgres.database }}
                   | gzip > /backups/saleor-$(date +%Y%m%d-%H%M%S).sql.gz
                   && find /backups -name 'saleor-*.sql.gz'

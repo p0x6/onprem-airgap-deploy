@@ -46,7 +46,20 @@ check() {  # check <label> <command...>
 check "k3s service active"    systemctl is-active --quiet k3s
 check "node Ready"            bash -c 'kubectl get nodes --no-headers 2>/dev/null | grep -q " Ready"'
 check "all pods healthy"      bash -c '! kubectl get pods --no-headers 2>/dev/null | grep -vE "Running|Completed" | grep -q .'
-check "database reachable"    kubectl exec postgres-0 -- pg_isready -q
+db_check() {
+  # HA mode: CNPG cluster — require quorum of ready instances + primary up.
+  if kubectl get cluster saleor-db >/dev/null 2>&1; then
+    local ready want primary
+    ready="$(kubectl get cluster saleor-db -o jsonpath='{.status.readyInstances}' 2>/dev/null)"
+    want="$(kubectl get cluster saleor-db -o jsonpath='{.spec.instances}' 2>/dev/null)"
+    primary="$(kubectl get pod -l cnpg.io/cluster=saleor-db,cnpg.io/instanceRole=primary -o name 2>/dev/null | head -1)"
+    [[ -n "$primary" && "${ready:-0}" -ge $(( want / 2 + 1 )) ]] \
+      && kubectl exec "${primary#pod/}" -- pg_isready -q >/dev/null 2>&1
+  else
+    kubectl exec postgres-0 -- pg_isready -q >/dev/null 2>&1
+  fi
+}
+check "database reachable"    db_check
 check "valkey answers PING"   bash -c 'kubectl exec deploy/valkey -- valkey-cli ping 2>/dev/null | grep -q PONG'
 check "graphql answers"       bash -c "curl -sk -m 20 --resolve ${SALEOR_HOST}:443:127.0.0.1 \
   -X POST https://${SALEOR_HOST}/graphql/ -H 'Content-Type: application/json' \
@@ -71,6 +84,16 @@ fi
 
 newest_backup="$(ls -t "$BACKUP_DIR"/saleor-*.sql.gz 2>/dev/null | head -1)"
 backup_check() {
+  # Not the data node? The dump files live elsewhere — ask the cluster
+  # when the backup job last succeeded instead of checking local disk.
+  if [[ -z "$newest_backup" ]] && kubectl get cronjob postgres-backup >/dev/null 2>&1; then
+    local last age_h
+    last="$(kubectl get cronjob postgres-backup -o jsonpath='{.status.lastSuccessfulTime}' 2>/dev/null)"
+    [[ -n "$last" ]] || return 1
+    age_h=$(( ($(date +%s) - $(date -d "$last" +%s)) / 3600 ))
+    [[ "$age_h" -le "$MAX_BACKUP_AGE_H" ]]
+    return
+  fi
   [[ -n "$newest_backup" ]] || return 1
   gzip -t "$newest_backup" 2>/dev/null || return 1
   local age_h=$(( ($(date +%s) - $(stat -c %Y "$newest_backup")) / 3600 ))

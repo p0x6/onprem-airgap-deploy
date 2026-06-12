@@ -31,8 +31,11 @@ IMAGES=(
   ghcr.io/kube-vip/kube-vip:v1.2.0   # HA control-plane VIP (multi-node)
   registry.k8s.io/descheduler/descheduler:v0.36.0   # rebalance after node recovery
   docker.io/library/registry:3.0.0   # in-enclave registry (multi-node)
+  ghcr.io/cloudnative-pg/cloudnative-pg:1.29.1   # pg operator (multi-node HA data)
+  ghcr.io/cloudnative-pg/postgresql:15.13        # replicated pg, same major as the data
 )
 CRANE_VERSION="v0.21.6"   # seeds the in-enclave registry from the tarballs
+CNPG_VERSION="1.29.1"     # operator manifest fetched from the release
 
 ARCH=""
 OUT="dist"
@@ -77,6 +80,16 @@ crane_arch="$([[ "$ARCH" == "arm64" ]] && echo arm64 || echo x86_64)"
 curl -fsL "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_${crane_arch}.tar.gz" \
   | tar -xzO crane > "${OUT}/${prefix}-crane"
 chmod +x "${OUT}/${prefix}-crane"
+
+# --- cnpg operator manifest (applied by box-install on the first server) ----
+echo ">> fetching cnpg operator manifest ${CNPG_VERSION}"
+curl -fsL "https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v${CNPG_VERSION}/cnpg-${CNPG_VERSION}.yaml" \
+  -o "${OUT}/${prefix}-cnpg-operator.yaml"
+# Two operator replicas (leader-elected): a single replica can die WITH the
+# node holding the primary, and a dead operator promotes nobody — the
+# failover authority must survive any one node. Found the hard way.
+sed -i.bak 's/^  replicas: 1$/  replicas: 2/' "${OUT}/${prefix}-cnpg-operator.yaml" \
+  && rm -f "${OUT}/${prefix}-cnpg-operator.yaml.bak"
 
 # --- helm: static binary, goes to the box alongside k3s ---------------------
 echo ">> fetching helm ${HELM_VERSION} (${ARCH})"

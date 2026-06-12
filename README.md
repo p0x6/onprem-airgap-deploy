@@ -6,7 +6,7 @@ Doing some role playing. I'm pretending I need to install ([Saleor](https://gith
 > One command per box, the only difference being a `join.conf` file carried with the bundle. Still fully air-gapped: no internet anywhere at any point, the nodes just have to be on the same LAN.
 
 > **🆕 HA / self-healing.** No single box whose death stops the cluster:
-> etcd quorum across 3 servers, a floating virtual IP (kube-vip), pods spread across machines, and an in-enclave registry (seeded from the bundle) so any pod can land on any node and find its image. Power-cut a node and the service answers throughout, full redundancy is back in **~99 seconds**, and when the node returns the descheduler puts work back on it — no operator action anywhere in that sentence. Drills are scripted: `scripts/drill.sh <node>` kills a node for real and verifies the recovery.
+> etcd quorum across 3 servers, a floating virtual IP (kube-vip), pods spread across machines, an in-enclave registry (seeded from the bundle) so any pod can land on any node and find its image and the database itself is replicated: one PostgreSQL primary plus two streaming standbys (CloudNativePG), one per machine, with automatic standby promotion if the primary's machine dies. Power-cut a node and the service answers throughout, full redundancy is back in **~99 seconds**, and when the node returns the descheduler puts work back on it — no operator action anywhere in that sentence. Drills are scripted: `scripts/drill.sh <node>` kills a node for real and verifies the recovery.
 
 
 The setup: a blank Ubuntu server, SSH only from inside the customer's network, zero outbound, and an operator who isn't an engineer but can run one command and email back whatever it prints. Everything in this repo follows from those constraints. The plan is in [PLAN.md](PLAN.md). The stuff that actually broke while building it is in [NOTES.md](NOTES.md), which is honestly the most interesting file here.
@@ -28,7 +28,7 @@ cd saleor-airgap-*/
 sudo ./install.sh
 ```
 
-Config gets generated into `/etc/saleor/install.conf`, keep it, upgrades need it. When it prints `RESULT: VERIFIED`, the report file next to it is the proof, and `https://saleor.local/dashboard/` works from any machine on the box's network (needs a hosts-file entry, and the cert is self-signed so the browser will complain once).
+Config gets generated into `/etc/saleor/install.conf`, keep it, upgrades need it ([docs/config.md](docs/config.md) documents every line of it and of `join.conf`). When it prints `RESULT: VERIFIED`, the report file next to it is the proof.
 
 **Multi-node:** install the first box with a VIP (`sudo CLUSTER_VIP=<free-LAN-ip> ./install.sh`) — it writes a `join.conf` next to its report. Carry that file, with the bundle, to each additional box and run the same `sudo ./install.sh`. `ROLE=server` in the file joins the control plane (keep the count odd), `ROLE=agent` joins a worker. See [docs/multi-node.md](docs/multi-node.md).
 
@@ -67,6 +67,8 @@ Every command in there has been run for real, including the deliberately broken 
 Images get a registry inside the gap: the install runs registry:3 on the first server and seeds it from the bundled tarballs (a static `crane` ships in the bundle — which doubles as an integrity check).
 k3s mirrors ghcr.io / docker.io / registry.k8s.io to it, so image names never change and with `registry.enabled=true` pulls flip from Never to IfNotPresent and get answered from the LAN. Upgrades push images once instead of staging tarballs per box. `scripts/check-registry.sh` proves it. It delete an image from a node, watch a pod pull it back  then confirm the internet is still unreachable.
 
+The database is replicated at the PostgreSQL layer, not the storage layer: CloudNativePG runs one primary and two streaming standbys, anti-affined so each lives on a different machine, each on its own local disk. The app only ever talks to the `rw` service, which always points at the current primary — when the primary's machine dies, the operator promotes a standby and the service follows. The operator itself runs two leader-elected replicas on different machines, because a single-replica operator can die with the node it was supposed to fail over.
+
 ## Layout
 
 ```
@@ -87,6 +89,6 @@ The layering rule: `install.sh` is UX and verification, `box-install.sh` is host
 
 Single node, demonstrated on an air-gapped arm64 VM (VirtualBox host-only network, no route out): one-shot install from blank → VERIFIED, survives reboot, upgrade v0.1.0 → v0.2.0, a deliberately broken upgrade that failed without taking the running stack down, rollback, and a backup restore.
 
-Multi-node, demonstrated on a 3-VM rig on the same gapped network: HA control plane (embedded etcd + kube-vip VIP), one-command joins from the same bundle, postgres pinned to a labeled data node with its backups, api spread across nodes, and a scripted power-cut drill — 99s to full redundancy with GraphQL answering throughout, automatic rejoin, automatic rebalance (descheduler), and an in-enclave registry seeded from the bundle — `scripts/check-registry.sh` deletes an image from a node and watches a pod pull it back over the LAN.
+Multi-node, demonstrated on a 3-VM rig on the same gapped network: HA control plane (embedded etcd + kube-vip VIP), one-command joins from the same bundle, postgres pinned to a labeled data node with its backups, api spread across nodes, and a scripted power-cut drill — 99s to full redundancy with GraphQL answering throughout, automatic rejoin, automatic rebalance (descheduler), an in-enclave registry seeded from the bundle (`scripts/check-registry.sh` deletes an image from a node and watches a pod pull it back over the LAN), and a replicated 3-instance PostgreSQL cluster spread across the machines — the kill-the-primary's-machine drill (standby promotion under power loss) is in final validation.
 
 Still to do: the x86_64 bare-metal pass on a real machine.

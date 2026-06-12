@@ -24,7 +24,17 @@ postgres:
   # Multi-node: pin the DB (and its backups) to one labeled box, e.g.
   #   kubectl label node <name> data=true   ->   nodeSelector: {data: "true"}
   # Empty = schedule anywhere (single-node behavior, unchanged).
+  # (Only applies to the single-instance StatefulSet; ha mode ignores it.)
   nodeSelector: {}
+  # Replicated postgres with automatic failover (CloudNativePG). Multi-node
+  # only — needs the operator that box-install stages on HA installs.
+  # When enabled the StatefulSet above is replaced by a 3-instance cluster,
+  # anti-affined across nodes, and the app talks to the rw service.
+  ha:
+    enabled: false
+    instances: 3
+    image: ghcr.io/cloudnative-pg/postgresql:15.13
+    storage: 10Gi
 
 failover:
   tolerationSeconds: 30
