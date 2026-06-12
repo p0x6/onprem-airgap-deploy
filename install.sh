@@ -186,16 +186,17 @@ else
         --set saleor.secretKey="$SECRET_KEY" \
         --set postgres.password="$POSTGRES_PASSWORD" \
         "${cluster_flags[@]}" --no-hooks --timeout 5m >/dev/null
-      note "waiting for the replicated database"
+      note "waiting for the database primary (standbys stay Pending until"
+      note "more boxes join — they schedule themselves as machines arrive)"
       want="$(kubectl get cluster saleor-db -o jsonpath='{.spec.instances}')"
       for _ in $(seq 1 45); do
         r="$(kubectl get cluster saleor-db -o jsonpath='{.status.readyInstances}' 2>/dev/null)"
         note "  instances ready: ${r:-0}/${want}"
-        [[ "$r" == "$want" ]] && break
+        [[ "${r:-0}" -ge 1 ]] && break
         sleep 10
       done
-      [[ "$(kubectl get cluster saleor-db -o jsonpath='{.status.readyInstances}' 2>/dev/null)" == "$want" ]] \
-        || { echo "replicated database never became ready" >&2; exit 1; }
+      [[ "$(kubectl get cluster saleor-db -o jsonpath='{.status.readyInstances}' 2>/dev/null)" -ge 1 ]] \
+        || { echo "database primary never became ready" >&2; exit 1; }
       note "restoring the dump into the new primary"
       P="$(kubectl get pod -l cnpg.io/cluster=saleor-db,cnpg.io/instanceRole=primary -o name | head -1)"
       gunzip -c "$dump" | kubectl exec -i "${P#pod/}" -- psql -q -U postgres -d saleor >/dev/null 2>&1
@@ -252,7 +253,8 @@ check "migrations complete"  bash -c '[[ "$(kubectl get job saleor-migrate -o js
 # until migrations finish) — sample over a window, not an instant
 pods_settled() {
   for _ in $(seq 1 12); do
-    kubectl get pods --no-headers 2>/dev/null | grep -vE "Running|Completed" | grep -q . || return 0
+    kubectl get pods --no-headers 2>/dev/null | grep -vE "Running|Completed" \
+      | grep -vE "^saleor-db-[0-9]+ .*Pending" | grep -q . || return 0
     sleep 10
   done
   return 1

@@ -25,4 +25,8 @@ spec:
   affinity:
     enablePodAntiAffinity: true
     topologyKey: kubernetes.io/hostname
+    # REQUIRED: instances created before their machines exist (single->multi
+    # conversion) wait Pending and schedule as nodes join. Preferred would
+    # stack them on one box forever — local volumes pin pods for life.
+    podAntiAffinityType: required
 {{- end }}

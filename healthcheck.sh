@@ -53,7 +53,11 @@ db_check() {
     ready="$(kubectl get cluster saleor-db -o jsonpath='{.status.readyInstances}' 2>/dev/null)"
     want="$(kubectl get cluster saleor-db -o jsonpath='{.spec.instances}' 2>/dev/null)"
     primary="$(kubectl get pod -l cnpg.io/cluster=saleor-db,cnpg.io/instanceRole=primary -o name 2>/dev/null | head -1)"
-    [[ -n "$primary" && "${ready:-0}" -ge $(( want / 2 + 1 )) ]] \
+    local nodes need
+    nodes="$(kubectl get nodes --no-headers 2>/dev/null | grep -c ' Ready')"
+    need=$(( want / 2 + 1 )); [[ "$nodes" -lt "$need" ]] && need="$nodes"
+    [[ "$need" -lt 1 ]] && need=1
+    [[ -n "$primary" && "${ready:-0}" -ge "$need" ]] \
       && kubectl exec "${primary#pod/}" -- pg_isready -q >/dev/null 2>&1
   else
     kubectl exec postgres-0 -- pg_isready -q >/dev/null 2>&1
