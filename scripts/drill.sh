@@ -101,6 +101,20 @@ done
 [[ -n "$rejoined" ]] || fail "${TARGET} did not rejoin"
 echo "  rejoined, no operator action, total drill: $(( $(date +%s) - t0 ))s"
 
+# With the rebalancer deployed, "recovered" includes getting work back
+if [[ "$is_data" != "true" ]] && K -n kube-system get cronjob descheduler >/dev/null 2>&1; then
+  say "waiting for automatic rebalance onto ${TARGET} (one descheduler cycle)"
+  reb=""
+  for _ in $(seq 1 80); do
+    cnt="$(K get pods -o wide --no-headers 2>/dev/null \
+      | awk -v n="$TARGET" '$3 == "Running" && $7 == n' | wc -l | tr -d ' ')"
+    [[ "$cnt" -ge 1 ]] && { reb=yes; break; }
+    sleep 15
+  done
+  [[ -n "$reb" ]] && echo "  ${cnt} pod(s) returned to ${TARGET}, no operator action" \
+    || fail "nothing rebalanced onto ${TARGET} within the window"
+fi
+
 say "final state"
 sleep 20
 K get pods -o wide --no-headers | awk '{print "  "$1, $3, $7}'

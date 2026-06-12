@@ -18,7 +18,7 @@ rules:
     resources: ["events"]
     verbs: ["create", "update"]
   - apiGroups: [""]
-    resources: ["nodes", "namespaces", "pods"]
+    resources: ["nodes", "namespaces", "pods", "persistentvolumeclaims"]
     verbs: ["get", "watch", "list"]
   - apiGroups: [""]
     resources: ["pods/eviction"]

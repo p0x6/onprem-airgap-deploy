@@ -256,7 +256,18 @@ k3s crictl images | grep -E 'saleor|postgres|valkey' || true
   exit 1
 }
 
-say "litmus test: pod with imagePullPolicy=Never"
+say "verifying images are UNPACKED, not just present"
+# A complete-but-unusable import is a real failure mode (NOTES.md #12):
+# content all there, no snapshot, every pod dies at container-create.
+bad="$(k3s ctr images check 2>/dev/null \
+  | grep -E 'saleor|postgres|valkey|kube-vip|descheduler' \
+  | awk '$NF == "false" {print $1}' | sort -u)"
+if [[ -n "$bad" ]]; then
+  echo "images present but not unpacked:" >&2
+  echo "$bad" >&2
+  echo "fix: zstd -dc <its tarball> | k3s ctr images import --platform linux/\$(arch) -" >&2
+  exit 1
+fi
 k3s kubectl delete pod valkey-test --ignore-not-found >/dev/null 2>&1
 k3s kubectl run valkey-test --image=valkey/valkey:8.1-alpine \
   --image-pull-policy=Never --restart=Never -- sleep 3
