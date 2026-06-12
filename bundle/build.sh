@@ -91,8 +91,18 @@ curl -fsL "https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v$
 # ...and the operator must start from the locally-staged image even when
 # the enclave registry's node is the one that died (pullPolicy Always would
 # create a circular dependency on the very failure being handled).
+# NB: these patches MUST live in the FILE — k3s reapplies manifests-dir
+# files on every server start, wiping any live kubectl patches.
 sed -i.bak -e 's/^  replicas: 1$/  replicas: 2/' \
   -e 's/imagePullPolicy: Always/imagePullPolicy: IfNotPresent/' \
+  -e '/^      serviceAccountName: cnpg-manager$/i\
+      topologySpreadConstraints:\
+      - maxSkew: 1\
+        topologyKey: kubernetes.io/hostname\
+        whenUnsatisfiable: ScheduleAnyway\
+        labelSelector:\
+          matchLabels:\
+            app.kubernetes.io/name: cloudnative-pg' \
   "${OUT}/${prefix}-cnpg-operator.yaml" \
   && rm -f "${OUT}/${prefix}-cnpg-operator.yaml.bak"
 
