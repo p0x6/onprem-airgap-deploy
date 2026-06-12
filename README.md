@@ -1,6 +1,6 @@
 # Air-gapped on-prem deploy
 
-I'm playing a vendor shipping a containerized Django stack ([Saleor](https://github.com/saleor/saleor): GraphQL API, Postgres, Valkey, Celery) to a bare-metal box with **no internet in either direction**, and supporting it without ever touching the machine.
+Doing some role playing. I'm pretending I need to install ([Saleor](https://github.com/saleor/saleor): GraphQL API, Postgres, Valkey, Celery) to a bare-metal box with **no internet in either direction**. It should be more or less a 1 command install that can be done copying files from a USB to a server.
 
 > **🆕 Multi-node, HA, still fully air-gapped.**
 > The same bundle now builds a x-node k3s cluster: embedded etcd, a floating virtual IP (kube-vip), pods spread across machines, and a power-cut node recovers in **~99 seconds**
