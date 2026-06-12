@@ -52,9 +52,15 @@ Drill 1: kill a non-data node mid-traffic. Acceptance: api pods reschedule onto 
 
 Drill 2: kill the DATA node. Acceptance is honesty: the control plane survives (VIP moves, kubectl fine), api pods reschedule and then crash-loop because the database is gone, healthcheck says exactly that, and recovery is the documented restore (new pin label, pg dump restore). This drill exists to show where self-healing ENDS until the storage phase — and to have rehearsed the recovery.
 
-**In-enclave registry.** registry:2 as a workload seeded from the bundle, registries.yaml on every node, chart flips to IfNotPresent. Only worth it if P2's per-node staging gets old, which is itself a finding worth writing down either way.
+**In-enclave registry (committed, next).** Per-node tarball staging officially got old: one image restaged to three nodes three times in a day.
 
-**Self-healing data (the remaining SPOF).** Two candidate paths, both heavy: Longhorn (replicated block storage, ~7 more images in the bundle, postgres PVC survives node loss and reschedules) or postgres streaming replication (lighter on the bundle, heavier on operations). Until one of these is picked, drill 2's documented restore IS the data story, and the nightly dump + etcd snapshots are what make it honest.
+The design:
+registry:2 as a host-layer manifest pinned to the data node (hostPath storage), exposed cluster-wide via NodePort so every node reaches it at localhost. k3s `registries.yaml` on every node sets the local registry as a MIRROR for ghcr.io / registry.k8s.io / docker.io — image names in the chart don't change at all. The bundle gains a static `crane` binary; the install seeds the registry by pushing the bundled tarballs once. The chart's pull policy flips to IfNotPresent when `registry.enabled`: a node missing an image pulls it from the mirror over the LAN. Trade being accepted: the loud-failure property of `Never` softens — the real enforcement is that the gap has no route out anyway. Bootstrap stays tarball-based (k3s's own images + the registry image itself arrive by file, as today).
+
+**Self-healing data**
+The shape: CNPG operator + its postgres image in the bundle, the chart's postgres StatefulSet replaced by a CNPG Cluster (2–3 instances, anti-affinity across nodes, each on its own local-path volume, streaming replication between them), app DATABASE_URL pointed at the rw service. The pg_dump CronJob stays (now against the rw service); the data=true label keeps meaning "where backup files land on disk."
+
+**Quick win, immediately: etcd snapshots into the support story.** k3s already snapshots etcd every 12h on the servers (/var/lib/rancher/k3s/server/db/snapshots) — healthcheck.sh gains a "recent etcd snapshot exists" check, and the recovery posture becomes statable with numbers: RPO ≤24h app data / ≤12h cluster state, RTO = the rehearsed restore.
 
 ## Test rig prep (one-time, manual)
 
