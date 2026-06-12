@@ -157,6 +157,15 @@ fi
 # --- [4/5] application -------------------------------------------------------
 if [[ -n "$JOIN_ROLE" ]]; then
   step "[4/5] app — skipped (already installed cluster-wide from the first server)"
+  # A new server existing is a redistribution opportunity that singletons
+  # born on the first box never get on their own: restart the database
+  # operator so its spread constraint seats replicas across machines NOW,
+  # not after the next node death proves it didn't. Idempotent, ~10s.
+  if kubectl -n cnpg-system get deploy cnpg-controller-manager >/dev/null 2>&1; then
+    note "respreading the database operator across the grown cluster"
+    kubectl -n cnpg-system rollout restart deploy/cnpg-controller-manager >/dev/null 2>&1 || true
+    kubectl -n cnpg-system rollout status deploy/cnpg-controller-manager --timeout=180s >/dev/null 2>&1 || true
+  fi
 else
   step "[4/5] app (helm upgrade --install)"
   # helm --wait is silent for minutes; narrate what it's waiting on so a
