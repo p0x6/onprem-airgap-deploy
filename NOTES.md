@@ -1,7 +1,8 @@
 # NOTES
 
-Things that broke during pass 1 and what fixed them. Setup: arm64 Ubuntu VM
-in VirtualBox on my Mac, host-only network for the air gap.
+Things that broke during and what fixed them.
+
+Setup: arm64 Ubuntu VM in VirtualBox on my Mac, host-only network for the air gap.
 
 ## 1. ctr images import looks fine but pods can't use the images
 
@@ -55,3 +56,11 @@ The migrate job was hooked on post-install,pre-upgrade. `helm rollback` is neith
 ## 12. docker save can produce a tarball that imports fine and cannot run
 
 The descheduler image (registry.k8s.io) imported cleanly on every node, showed in crictl — and every pod using it died at container-create with "parent snapshot ... does not exist". The `docker save` archive was missing part of the layer chain: newer docker exports the multi-arch index (registry.k8s.io attaches attestation manifests to theirs) and the result isn't complete. Five images from ghcr/docker hub were fine; the sixth wasn't. The nasty part is where it fails: not at build, not at import, not at checksum verify — only when a container actually starts, i.e. on the customer's box. Fix in build.sh: resolve the platform digest with `docker manifest inspect` and pull/tag/save THAT for every image, so no archive is ever cut from an index.
+
+## 13. The image-archive field guide (it got worse before it got better)
+
+Building the in-enclave registry surfaced two more ways a docker save archive can be wrong. (a) Complete but never UNPACKED: re-importing known content makes containerd register the image without building its snapshots — present in crictl, dies at container-create. box-install now checks `ctr images check` for unpacked=false and auto-repairs with a direct `--platform` import. (b) Complete plus a stowaway: registries that attach attestation referrers (registry:3, kube-vip) get a second index entry in the archive, which crane refuses to push. The seeder strips non-named entries before pushing. Bonus discovery: crane is an accidental validator — it refuses exactly the malformed archives containerd quietly tolerates, so seeding the registry doubles as an integrity check the tarball path never had.
+
+## 14. On a cluster, an unpinned test pod tests a random machine
+
+Three different scripts hit this in one day: the installer's litmus pod, the image-health test pods, and the drill's rebalance check all gave answers about whichever node the scheduler happened to pick (usually the emptiest — which is exactly the node you're NOT trying to test, or exactly the broken one, depending on the day). Everything that verifies a specific box now pins with nodeName. Single-node installs never notice the difference, which is why the bug shipped in the first place.
