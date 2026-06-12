@@ -353,9 +353,22 @@ if [[ -n "$bad" ]]; then
   fi
   echo "   repaired."
 fi
+# Litmus pinned to THIS node: on a multi-node cluster an unpinned pod
+# tests a random box — the installer's job is to verify the box it's on.
 k3s kubectl delete pod valkey-test --ignore-not-found >/dev/null 2>&1
-k3s kubectl run valkey-test --image=valkey/valkey:8.1-alpine \
-  --image-pull-policy=Never --restart=Never -- sleep 3
+k3s kubectl apply -f - >/dev/null <<EOF
+apiVersion: v1
+kind: Pod
+metadata: {name: valkey-test}
+spec:
+  nodeName: $(hostname)
+  restartPolicy: Never
+  containers:
+    - name: t
+      image: valkey/valkey:8.1-alpine
+      imagePullPolicy: Never
+      command: ["sleep", "3"]
+EOF
 if ! k3s kubectl wait pod/valkey-test \
     --for=jsonpath='{.status.phase}'=Succeeded --timeout=90s; then
   echo "litmus test FAILED:" >&2
