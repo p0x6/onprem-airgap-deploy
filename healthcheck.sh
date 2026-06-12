@@ -67,7 +67,7 @@ check "database reachable"    db_check
 check "valkey answers PING"   bash -c 'kubectl exec deploy/valkey -- valkey-cli ping 2>/dev/null | grep -q PONG'
 check "graphql answers"       bash -c "curl -sk -m 20 --resolve ${SALEOR_HOST}:443:127.0.0.1 \
   -X POST https://${SALEOR_HOST}/graphql/ -H 'Content-Type: application/json' \
-  -d '{\"query\":\"{ shop { name } }\"}' | grep -q '\"name\"'"
+  -d '{\"query\":\"{ shop { name } }\"}' | grep -q '\"data\":{\"shop\"'"
 check "disk <90% used on /"   bash -c '[[ "$(df --output=pcent / | tail -1 | tr -dc 0-9)" -lt 90 ]]'
 stuck_pods_check() {
   # Pods wedged mid-deletion (e.g. evicted during a node bounce) can sit

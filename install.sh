@@ -76,8 +76,13 @@ avail_gb="$(df --output=avail -BG / | tail -1 | tr -dc 0-9)"
 # Multi-node: a join.conf next to the bundle means this box joins an
 # existing cluster instead of becoming one (see docs/multi-node.md).
 JOIN_ROLE=""
-[[ -f "$BUNDLE_DIR/join.conf" ]] \
-  && JOIN_ROLE="$(sed -n 's/^ROLE=//p' "$BUNDLE_DIR/join.conf" | head -1)"
+# A first server's own dist contains the join.conf it WROTE for other boxes
+# — same trap as box-install.sh: don't let a re-run demote this box to a
+# joiner. cluster-init in the k3s config marks "I am the first server".
+if ! grep -qs "^cluster-init" /etc/rancher/k3s/config.yaml; then
+  [[ -f "$BUNDLE_DIR/join.conf" ]] \
+    && JOIN_ROLE="$(sed -n 's/^ROLE=//p' "$BUNDLE_DIR/join.conf" | head -1)"
+fi
 note "bundle ${PREFIX}, ${avail_gb}GB free${JOIN_ROLE:+, joining cluster as ${JOIN_ROLE}}"
 
 # --- [2/5] config ------------------------------------------------------------
@@ -116,6 +121,23 @@ fi
 # --- [3/5] host + cluster ------------------------------------------------------
 step "[3/5] k3s + images (box-install.sh)"
 ( cd "$BUNDLE_DIR" && CLUSTER_VIP="${CLUSTER_VIP:-}" "./${PREFIX}-box-install.sh" )
+
+# The sqlite->etcd conversion restarts the API server again shortly after
+# box-install returns — an unguarded kubectl in that blip kills the install
+# (seen live). Demand three consecutive green API checks before continuing.
+if command -v k3s >/dev/null 2>&1 && [[ "$JOIN_ROLE" != "agent" ]]; then
+  note "waiting for a stable API (conversion can blip it)"
+  ok_streak=0
+  for _ in $(seq 1 60); do
+    if kubectl get --raw /readyz >/dev/null 2>&1; then
+      ok_streak=$((ok_streak+1)); [[ "$ok_streak" -ge 3 ]] && break
+    else
+      ok_streak=0
+    fi
+    sleep 5
+  done
+  [[ "$ok_streak" -ge 3 ]] || { echo "API never stabilized after install" >&2; exit 1; }
+fi
 
 # Agents have no API server — their verification IS box-install's PASS; the
 # cluster-side proof comes from `kubectl get nodes` on a server.
@@ -268,7 +290,7 @@ graphql_smoke() {
   for _ in $(seq 1 9); do
     curl -sk -m 20 --resolve "${SALEOR_HOST}:443:127.0.0.1" \
       -X POST "https://${SALEOR_HOST}/graphql/" -H 'Content-Type: application/json' \
-      -d '{"query":"{ shop { name } }"}' | grep -q '"name"' && return 0
+      -d '{"query":"{ shop { name } }"}' | grep -q '"data":{"shop"' && return 0
     sleep 10
   done
   return 1
