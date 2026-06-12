@@ -2,6 +2,8 @@
 
 [![Demo video](https://cdn.loom.com/sessions/thumbnails/5b9b7d82f86f48148e8c2e0440a35591-7ff07e20ef6ba33b.gif)](https://www.loom.com/share/5b9b7d82f86f48148e8c2e0440a35591)
 
+▶️ **[Watch the demo](https://www.loom.com/share/5b9b7d82f86f48148e8c2e0440a35591)** (18 min)
+
 Doing some role playing. I'm pretending I need to install ([Saleor](https://github.com/saleor/saleor): GraphQL API, Postgres, Valkey, Celery) to a bare-metal box with **no internet in either direction**. It should be more or less a 1 command install that can be done copying files from a USB to a server.
 
 > **🆕 Multi-node.** The same bundle now builds an N-node k3s cluster.
