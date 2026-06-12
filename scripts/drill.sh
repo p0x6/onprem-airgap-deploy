@@ -151,6 +151,18 @@ if [[ "$is_data" != "true" ]] && K -n kube-system get cronjob descheduler >/dev/
     || fail "nothing rebalanced onto ${TARGET} within the window"
 fi
 
+if [[ -n "$expect_promotion" ]]; then
+  say "waiting for the old primary to rejoin as a standby (full 3/3)"
+  resync=""
+  for _ in $(seq 1 60); do
+    r="$(K get cluster saleor-db -o jsonpath='{.status.readyInstances}' 2>/dev/null)"
+    w="$(K get cluster saleor-db -o jsonpath='{.spec.instances}' 2>/dev/null)"
+    [[ -n "$r" && "$r" == "$w" ]] && { resync=yes; echo "  database back to ${r}/${w}"; break; }
+    sleep 10
+  done
+  [[ -n "$resync" ]] || fail "old primary never re-synced — cluster stuck below spec"
+fi
+
 say "final state"
 sleep 20
 K get pods -o wide --no-headers | awk '{print "  "$1, $3, $7}'

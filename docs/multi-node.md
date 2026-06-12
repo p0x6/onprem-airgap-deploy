@@ -73,6 +73,16 @@ Two of three servers down = the API stops serving (etcd needs a majority). The d
 
 3. **All servers gone:** fresh box + bundle, then `k3s server --cluster-reset --cluster-reset-restore-path=<etcd snapshot>` restores cluster state; the pg dump restore brings back the app's data. This is why install.sh primes a first backup AND an etcd snapshot, and why healthcheck refuses to call a system healthy without fresh copies of both.
 
+## Stuck pods after a node returns
+
+A pod that was marked for eviction while its node was dead can wedge when the node comes back — deletionTimestamp set, volume mounts failing, going nowhere, and kubernetes will wait forever. healthcheck flags any pod stuck terminating >5 minutes. The fix is one command, and it is safe: the controller (or the CNPG operator) recreates the pod immediately:
+
+```bash
+kubectl delete pod <name> --force --grace-period=0
+```
+
+Seen in the wild here: the database primary's pod, wedged on its returned node while the cluster status still claimed it healthy. With the two-replica operator and working failover this state is a nuisance, not an outage. The cluster has already moved on to a promoted primary.
+
 ## Test rig prep (one-time, manual)
 
 The clone script needs a base VM to copy. Make it once:

@@ -65,6 +65,28 @@ check "graphql answers"       bash -c "curl -sk -m 20 --resolve ${SALEOR_HOST}:4
   -X POST https://${SALEOR_HOST}/graphql/ -H 'Content-Type: application/json' \
   -d '{\"query\":\"{ shop { name } }\"}' | grep -q '\"name\"'"
 check "disk <90% used on /"   bash -c '[[ "$(df --output=pcent / | tail -1 | tr -dc 0-9)" -lt 90 ]]'
+stuck_pods_check() {
+  # Pods wedged mid-deletion (e.g. evicted during a node bounce) can sit
+  # forever holding a service hostage. Fix: kubectl delete pod <p> --force
+  local now stuck
+  now="$(date +%s)"
+  stuck="$(kubectl get pods -o json 2>/dev/null | python3 -c "
+import json, sys, datetime
+now = $(date +%s)
+try:
+    pods = json.load(sys.stdin)['items']
+except Exception:
+    sys.exit(0)
+for p in pods:
+    ts = p['metadata'].get('deletionTimestamp')
+    if not ts: continue
+    t = datetime.datetime.strptime(ts, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.timezone.utc).timestamp()
+    if now - t > 300:
+        print(p['metadata']['name'])
+")"
+  [[ -z "$stuck" ]]
+}
+check "no pods stuck terminating >5m" stuck_pods_check
 
 # Cluster-state backups: k3s snapshots etcd every 12h on HA servers. Only
 # checked where the snapshot dir exists (HA servers) — single-node installs
